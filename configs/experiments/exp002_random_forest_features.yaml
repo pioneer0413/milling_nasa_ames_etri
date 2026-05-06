@@ -1,0 +1,69 @@
+experiment:
+  experiment_id: null
+  name: exp002_random_forest_features
+  seed: 7
+
+dataset:
+  name: example_milling
+  dataset_version: v1
+  num_samples: 96
+  num_channels: 3
+  sequence_length: 256
+  num_classes: 3
+
+task:
+  type: classification
+  target_column: label
+  num_classes: 3
+
+preprocessing:
+  output_type: features
+  cache:
+    enabled: false
+  steps:
+    - name: normalization
+      method: zscore
+      fit_on: train
+    - name: steady_cut
+      mode: sliding_window
+      method: none
+      window_size: 128
+      stride: 128
+    - name: statistical_features
+
+split:
+  strategy: random
+  validation_ratio: 0.2
+  test_ratio: 0.2
+  leakage_check: true
+
+model:
+  name: random_forest
+  model_type: ML
+  input_type: feature-based
+  params:
+    n_estimators: 50
+    random_state: 7
+
+training:
+  epochs: 1
+  batch_size: 32
+  optimizer: none
+  learning_rate: 0.0
+  seed: 7
+
+checkpoint:
+  enabled: false
+
+evaluation:
+  metrics: [accuracy, f1_macro]
+  group_metrics: [domain_id, condition_id]
+
+logging:
+  save_environment: true
+  save_git_state: true
+  shape_trace: true
+
+report:
+  enabled: true
+  formats: [md]

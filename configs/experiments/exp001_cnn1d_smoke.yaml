@@ -1,0 +1,76 @@
+experiment:
+  experiment_id: null
+  name: exp001_cnn1d_smoke
+  seed: 42
+
+dataset:
+  name: example_milling
+  dataset_version: v1
+  num_samples: 48
+  num_channels: 3
+  sequence_length: 128
+  num_classes: 3
+
+task:
+  type: classification
+  target_column: label
+  num_classes: 3
+  positive_label: null
+
+preprocessing:
+  output_type: timeseries
+  cache:
+    enabled: false
+  steps:
+    - name: normalization
+      method: zscore
+      fit_on: train
+    - name: steady_cut
+      mode: full_signal
+      method: none
+
+split:
+  strategy: dataset_run_wise
+  group_key: dataset_run_id
+  validation_ratio: 0.2
+  test_ratio: 0.2
+  leakage_check: true
+
+model:
+  name: cnn1d
+  model_type: DL
+  input_type: timeseries-based
+  params:
+    num_channels: 3
+    num_classes: 3
+    hidden_dim: 16
+
+training:
+  epochs: 2
+  batch_size: 8
+  optimizer: adam
+  learning_rate: 0.001
+  seed: 42
+
+checkpoint:
+  enabled: true
+  monitor: val_loss
+  mode: min
+  save_best: true
+  save_last: true
+  save_interval: 1
+  max_keep: 2
+  resume_from: null
+
+evaluation:
+  metrics: [accuracy, f1_macro]
+  group_metrics: [domain_id, condition_id]
+
+logging:
+  save_environment: true
+  save_git_state: true
+  shape_trace: true
+
+report:
+  enabled: true
+  formats: [md]

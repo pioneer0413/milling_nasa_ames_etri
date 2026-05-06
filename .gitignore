@@ -1,0 +1,111 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+venv312/
+
+# IDE / editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Environment variables / local secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Build / packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs
+*.log
+logs/
+logging_outputs/
+
+# Dataset storage
+datasets/raw/
+datasets/processed/
+datasets/cache/
+datasets/tmp/
+
+# Experiment execution outputs
+experiments/executions/
+experiments/comparisons/
+experiments/index.csv
+
+# Runtime artifacts
+artifacts/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.pickle
+*.joblib
+
+# Generated metrics / predictions / reports
+metrics/
+predictions/
+figures/
+reports/generated/
+
+# Cache
+cache/
+.cache/
+tmp/
+temp/
+
+# Test outputs
+tests/outputs/
+tests/tmp/
+
+# Smoke test artifacts
+smoke_outputs/
+smoke_*.json
+smoke_*.csv
+smoke_*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS files
+Thumbs.db
+
+# Large numeric/data files
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.parquet
+*.feather
+*.mat
+
+# Optional ML tracking outputs
+mlruns/
+wandb/
+tensorboard/
+runs/
+
+# Local version/generated files
+VERSION.local
+*.local.yaml
+*.local.yml
