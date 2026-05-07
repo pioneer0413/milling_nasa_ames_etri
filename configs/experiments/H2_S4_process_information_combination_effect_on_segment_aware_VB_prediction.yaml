@@ -1,0 +1,95 @@
+experiment:
+  experiment_id: null
+  name: H2_S4_process_information_combination_effect_on_segment_aware_VB_prediction
+  analysis_type: Exploratory
+
+dataset:
+  name: mill_processed_enabled
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
+  dataset_version: enabled_cases_with_heuristic_segments_v1
+
+task:
+  type: regression
+  target_column: VB
+
+preprocessing:
+  output_type: features
+  no_load_excluded: true
+  feature_scaling:
+    enabled: true
+    fit_on: train
+  process_preprocessing:
+    numeric: median_imputation_standard_scaler
+    categorical: most_frequent_imputation_one_hot_encoder
+    fit_on: train
+  sensor_setting: all_sensors
+  segment_settings:
+    - full_length
+    - steady
+    - entry
+    - exit
+    - entry_steady
+    - entry_exit
+    - steady_exit
+
+process_factors:
+  A:
+    name: DoC
+    expected_columns: [DOC]
+  B:
+    name: Feed
+    expected_columns: [feed]
+  C:
+    name: Material
+    expected_columns: [material_name]
+  D:
+    name: Time
+    expected_columns: [time]
+
+process_combinations:
+  - doc
+  - feed
+  - material
+  - time
+  - doc_feed
+  - doc_material
+  - doc_time
+  - feed_material
+  - feed_time
+  - material_time
+  - doc_feed_material
+  - doc_feed_time
+  - doc_material_time
+  - feed_material_time
+  - doc_feed_material_time
+
+feature_groups:
+  - sensor_only
+  - process_only
+  - sensor_plus_process
+
+models:
+  - random_forest
+  - mlp
+
+model_defaults:
+  random_forest:
+    n_jobs: -1
+  mlp:
+    hidden_layer_sizes: [64, 32, 16]
+    max_iter: 300
+    learning_rate_init: 0.001
+
+seeds:
+  initial_seeds: [0, 1, 2]
+  extra_seeds: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  seed_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
+evaluation:
+  metrics: [mae, rmse, r2, pearson, spearman]
+
+report:
+  enabled: true
+  formats: [md, html]

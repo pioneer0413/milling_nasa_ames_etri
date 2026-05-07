@@ -1,0 +1,55 @@
+experiment:
+  experiment_id: null
+  name: H1_S1_segment_feature_VB_association_no_noload
+  analysis_type: Exploratory
+
+dataset:
+  name: mill_processed_enabled
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
+  dataset_version: enabled_cases_with_heuristic_segments_v1
+
+task:
+  type: exploratory_association_analysis
+  target_column: VB
+
+preprocessing:
+  output_type: features
+  no_load_excluded: true
+  segment_settings:
+    - full_length
+    - steady
+    - entry
+    - exit
+    - entry_steady
+    - entry_exit
+    - steady_exit
+  feature_names:
+    - mean
+    - std
+    - max
+    - min
+    - peak_to_peak
+    - kurtosis
+    - skewness
+    - spectral_centroid
+    - band_energy
+
+analysis:
+  input_type: feature_table
+  association_measures:
+    - pearson
+    - spearman
+    - mutual_information
+  deferred_measures:
+    - distance_correlation
+    - kendall_tau
+  ranking:
+    primary: top3_mean_abs_spearman
+    secondary: top3_mean_abs_pearson
+    tertiary: top3_mean_mutual_information
+
+report:
+  enabled: true
+  formats: [md, html]

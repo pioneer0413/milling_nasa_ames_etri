@@ -1,0 +1,79 @@
+model:
+  name: hybrid_lstm_process
+  input_type: timeseries
+  architecture: HybridLSTMProcessRegressor
+  sensor_setting: all_sensors
+  segment_mode: entry_exit
+  use_process_info: true
+  process_combination: doc_feed_material_time
+  input_mode: sensor_plus_process
+  lstm:
+    input_size: auto
+    hidden_size: 256
+    num_layers: 3
+    dropout: 0.2
+    bidirectional: false
+    batch_first: true
+    temporal_output_mode: last_hidden
+  regression_head:
+    hidden_dims: [32, 8]
+    activation: relu
+    dropout: 0.2
+    output_dim: 1
+
+training:
+  loss: mse
+  optimizer: adam
+  learning_rate: 0.001
+  batch_size: 16
+  max_epochs: 200
+  early_stopping:
+    enabled: true
+    monitor: val_rmse
+    patience: 30
+    mode: min
+  checkpoint:
+    enabled: true
+    save_best: true
+    save_last: true
+    monitor: val_rmse
+    mode: min
+
+preprocessing:
+  sequence_scaler: zscore
+  process_scaler: standard
+  fit_scaler_on_train_only: true
+  target_scaler: none
+  sequence_length: 512
+
+data:
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
+  cases: [1, 2, 8, 9, 12, 14]
+  expected_sensors: [smcAC, smcDC, vib_spindle, vib_table, AE_spindle, AE_table]
+
+process_information:
+  available_combinations:
+    - none
+    - doc
+    - feed
+    - material
+    - time
+    - doc_feed
+    - doc_material
+    - doc_time
+    - feed_material
+    - feed_time
+    - material_time
+    - doc_feed_material
+    - doc_feed_time
+    - doc_material_time
+    - feed_material_time
+    - doc_feed_material_time
+    - without_time
+    - without_material
+    - without_time_material
+  leakage_warning:
+    time: Time may encode wear progression or run order; validate prediction-time availability.
+    material: Material may act as a case/domain shortcut; validate with domain-shift ablation.

@@ -1,0 +1,57 @@
+experiment:
+  experiment_id: null
+  name: exp003_guideline_domain_shift_rf
+  seed: 42
+
+dataset:
+  name: mill_processed_domain_shift
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  dataset_version: enabled_cases_v1
+
+task:
+  type: regression
+  target_column: VB
+
+preprocessing:
+  output_type: features
+  cache:
+    enabled: false
+  steps: []
+
+split:
+  strategy: fixed_case_pair_domain_shift
+  validation_policy: smaller_source_case
+  leakage_check: true
+
+model:
+  name: random_forest_regressor
+  model_type: ML
+  input_type: feature-based
+  params:
+    n_estimators: 80
+    random_state: 42
+    min_samples_leaf: 2
+
+training:
+  epochs: 1
+  batch_size: 32
+  optimizer: none
+  learning_rate: 0.0
+  seed: 42
+
+checkpoint:
+  enabled: false
+
+evaluation:
+  metrics: [mae, rmse, r2]
+  group_metrics: [source_domain, target_domain]
+
+logging:
+  save_environment: true
+  save_git_state: true
+  shape_trace: true
+
+report:
+  enabled: true
+  formats: [md]

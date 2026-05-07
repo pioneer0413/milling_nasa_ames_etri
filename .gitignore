@@ -109,3 +109,5 @@ runs/
 VERSION.local
 *.local.yaml
 *.local.yml
+
+docs/papers/

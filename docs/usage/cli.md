@@ -1,3 +1,6 @@
+# Virtual environment Usage
+path: `/home/hwkang/manufacturing_data_exercise/02_milling_v2/venv312`
+
 # CLI Usage
 
 Run a single experiment:
@@ -24,9 +27,31 @@ Feature-based RandomForest example:
 python scripts/run_experiment.py --config configs/experiments/exp002_random_forest_features.yaml
 ```
 
+Fixed six-scenario case-pair domain-shift execution:
+
+```bash
+python scripts/run_domain_shift_experiment.py --config configs/experiments/exp003_guideline_domain_shift_rf.yaml
+```
+
+S1 segment-setting effect execution:
+
+```bash
+python scripts/run_s1_experiment.py --config configs/experiments/S1_segment_setting_effect_on_VB_prediction.yaml --dry-run --seed-mode initial
+python scripts/run_s1_experiment.py --config configs/experiments/S1_segment_setting_effect_on_VB_prediction.yaml --seed-mode initial
+python scripts/run_s1_experiment.py --config configs/experiments/S1_segment_setting_effect_on_VB_prediction.yaml --seed-mode extra
+python scripts/merge_s1_executions.py --config configs/experiments/S1_segment_setting_effect_on_VB_prediction.yaml --execution-dirs <initial_execution_dir> <extra_execution_dir>
+```
+
+H1.S1 segment feature to VB association EDA:
+
+```bash
+python scripts/run_h1_s1_eda.py --config configs/experiments/H1_S1_segment_feature_VB_association_no_noload.yaml --dry-run
+python scripts/run_h1_s1_eda.py --config configs/experiments/H1_S1_segment_feature_VB_association_no_noload.yaml
+```
+
 ## Experiment Execution Guidelines
 
-These guidelines define the intended execution contract for the milling domain-shift experiments. The current MVP CLI can run one experiment config at a time; automatic execution of all six domain-shift scenarios should be implemented before these guidelines are treated as fully enforced by code.
+These guidelines define the intended execution contract for the milling domain-shift experiments. Use `scripts/run_domain_shift_experiment.py` to run the fixed six-scenario protocol in one execution.
 
 ### 1. Case Scope
 
@@ -144,8 +169,9 @@ metric_value
   "aggregation": "mean_over_6_domain_shifts",
   "shift_scenarios": ["A_to_B", "A_to_C", "B_to_A", "B_to_C", "C_to_A", "C_to_B"],
   "final_metrics": {
-    "accuracy": 0.89,
-    "f1_macro": 0.87
+    "rmse": 0.89,
+    "r2": 0.87,
+    "mae": 0.55,
   }
 }
 ```
@@ -159,3 +185,108 @@ metric_value
 - Target-domain data must not be used for anything except evaluation.
 - Validation, normalization fitting, feature selection, and hyperparameter tuning must use source-domain data only.
 - The final report must include both per-shift metrics and averaged metrics.
+
+## S2 Sensor Combination Experiment
+
+Run the no-load-excluded, segment-aware VB prediction experiment with sensor group combinations:
+
+```bash
+python scripts/run_s2_experiment.py \
+  --config configs/experiments/S2_sensor_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --dry-run \
+  --seed-mode initial
+```
+
+After dry-run validation succeeds, run the initial and extra seed batches:
+
+```bash
+python scripts/run_s2_experiment.py \
+  --config configs/experiments/S2_sensor_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --seed-mode initial
+
+python scripts/run_s2_experiment.py \
+  --config configs/experiments/S2_sensor_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --seed-mode extra
+```
+
+Merge both batches into one 20-seed result:
+
+```bash
+python scripts/merge_s2_executions.py \
+  --config configs/experiments/S2_sensor_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --execution-dirs \
+  experiments/executions/{initial_execution_id} \
+  experiments/executions/{extra_execution_id}
+```
+
+The S2 execution writes `sensor_group_mapping.csv`, `shift_metrics.csv`, `seed_metrics.csv`, `sensor_combination_metrics.csv`, sensor-combination effect analysis, segment-effect analysis, figures, and `report.md`.
+
+## H2.S3 Feature Combination Experiment
+
+Run the all-sensors, no-load-excluded, segment-aware VB prediction experiment over feature group combinations:
+
+```bash
+python scripts/run_h2_s3_experiment.py \
+  --config configs/experiments/H2_S3_feature_combination_effect_on_segment_aware_VB_prediction_all_sensors.yaml \
+  --dry-run \
+  --seed-mode initial
+```
+
+After dry-run validation succeeds, run the initial and extra seed batches:
+
+```bash
+python scripts/run_h2_s3_experiment.py \
+  --config configs/experiments/H2_S3_feature_combination_effect_on_segment_aware_VB_prediction_all_sensors.yaml \
+  --seed-mode initial
+
+python scripts/run_h2_s3_experiment.py \
+  --config configs/experiments/H2_S3_feature_combination_effect_on_segment_aware_VB_prediction_all_sensors.yaml \
+  --seed-mode extra
+```
+
+Merge both batches into one 20-seed result:
+
+```bash
+python scripts/merge_h2_s3_executions.py \
+  --config configs/experiments/H2_S3_feature_combination_effect_on_segment_aware_VB_prediction_all_sensors.yaml \
+  --execution-dirs \
+  experiments/executions/{initial_execution_id} \
+  experiments/executions/{extra_execution_id}
+```
+
+The H2.S3 execution fixes `sensor_setting=all_sensors` and writes feature-combination metrics, feature group contribution analysis, segment-effect analysis, figures, and `report.md`.
+
+## H2.S4 Process Information Experiment
+
+Run the all-sensors, no-load-excluded, segment-aware VB prediction experiment over process information combinations:
+
+```bash
+python scripts/run_h2_s4_experiment.py \
+  --config configs/experiments/H2_S4_process_information_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --dry-run \
+  --seed-mode initial
+```
+
+After dry-run validation succeeds, run the initial and extra seed batches:
+
+```bash
+python scripts/run_h2_s4_experiment.py \
+  --config configs/experiments/H2_S4_process_information_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --seed-mode initial
+
+python scripts/run_h2_s4_experiment.py \
+  --config configs/experiments/H2_S4_process_information_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --seed-mode extra
+```
+
+Merge both batches into one 20-seed result:
+
+```bash
+python scripts/merge_h2_s4_executions.py \
+  --config configs/experiments/H2_S4_process_information_combination_effect_on_segment_aware_VB_prediction.yaml \
+  --execution-dirs \
+  experiments/executions/{initial_execution_id} \
+  experiments/executions/{extra_execution_id}
+```
+
+The H2.S4 execution writes prefixed outputs such as `H2_S4_shift_metrics.csv`, `H2_S4_process_information_mapping.csv`, process-effect analysis, process-factor contribution analysis, figures, and `H2_S4_report.md`.
