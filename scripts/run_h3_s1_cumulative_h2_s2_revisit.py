@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import scripts.run_cumulative_s_dnn_experiment as h3s3
 from milling_experiment_framework.experiment_logging.environment import collect_environment
+from milling_experiment_framework.experiments.execution_path import create_execution_dir, find_experiment_dirs
 from milling_experiment_framework.models.dl.cumulative_descriptor import CumulativeDescriptor
 
 
@@ -56,9 +57,9 @@ def main() -> None:
     parser.add_argument("--input-representation", default="cumulative")
     parser.add_argument("--mode", default="s_dnn")
     parser.add_argument("--sequence-length", type=int, default=128)
-    parser.add_argument("--max-epochs", type=int, default=2)
+    parser.add_argument("--max-epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--cv-folds", type=int, default=2)
+    parser.add_argument("--cv-folds", type=int, default=5)
     parser.add_argument("--quick-hidden-size", type=int, default=8)
     args = parser.parse_args()
 
@@ -67,7 +68,8 @@ def main() -> None:
         config = h3s3.load_config(Path(args.config))
         configure_for_revisit(config, args)
         experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_H3_S1_cumulative_descriptor_sensor_combination_H2_S2_revisit")
-        output_dir = Path("experiments") / "executions" / experiment_id
+        path_config = {"experiment": {"experiment_id": experiment_id}}
+        output_dir = Path(create_execution_dir(path_config, root=Path("experiments") / "executions"))
         prepare_dirs(output_dir)
         logger = make_logger(output_dir / "logs" / f"{PREFIX}_run.log")
         device = torch.device("cuda" if torch.cuda.is_available() and config.get("training", {}).get("device") == "cuda" else "cpu")
@@ -78,7 +80,10 @@ def main() -> None:
         h2_files = load_h2_s2_files(h2)
         write_json(output_dir / "data" / f"{PREFIX}_source_H2_S2_summary.json", {"source_dir": str(h2), "loaded_files": {k: str(v) for k, v in h2_files.items()}})
         write_json(output_dir / "configs" / f"{PREFIX}_input_config.yaml", config)
-        write_json(output_dir / "configs" / f"{PREFIX}_resolved_config.yaml", {"experiment_id": experiment_id, "experiment_name": EXPERIMENT_NAME, "config": config})
+        write_json(
+            output_dir / "configs" / f"{PREFIX}_resolved_config.yaml",
+            {"experiment": path_config["experiment"], "experiment_id": experiment_id, "experiment_name": EXPERIMENT_NAME, "config": config},
+        )
 
         smoke = h3s3.run_smoke_test(ctx)
         write_json(output_dir / "data" / f"{PREFIX}_smoke_test_result.json", smoke)
@@ -182,9 +187,14 @@ def make_logger(path: Path):
 
 
 def find_h2_s2_baseline() -> Path:
-    candidates = [p for p in sorted(Path("experiments/executions").glob("*H2_S2*")) if "H3_S1" not in p.name and p.is_dir()]
+    candidates = [Path(p) for p in find_experiment_dirs("experiments/executions", hypothesis_id="H2", scenario_id="S2", include_legacy=True)]
+    candidates = [p for p in candidates if "H3_S1" not in p.name and p.is_dir()]
     if not candidates:
-        candidates = [p for p in sorted(Path("experiments/executions").glob("*sensor_combination*")) if "H3_S1" not in p.name and p.is_dir()]
+        candidates = [
+            Path(p)
+            for p in find_experiment_dirs("experiments/executions", keyword="sensor_combination", include_legacy=True)
+            if "H3_S1" not in Path(p).name and Path(p).is_dir()
+        ]
     if not candidates:
         raise FileNotFoundError("Could not find H2_S2 baseline experiment directory.")
     return candidates[-1]

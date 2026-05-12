@@ -1,0 +1,23 @@
+[
+  {
+    "warning_level": "CRITICAL",
+    "warning_code": "RUNTIME_HOURS",
+    "message": "estimated runtime is high: 147.0",
+    "affected_phase": "selected",
+    "suggested_action": "Use reduced grid or fewer seeds."
+  },
+  {
+    "warning_level": "WARNING",
+    "warning_code": "DISK_USAGE",
+    "message": "estimated disk usage 185309.4 MB exceeds threshold",
+    "affected_phase": "full",
+    "suggested_action": "Reduce checkpoints or max_keep."
+  },
+  {
+    "warning_level": "HIGH",
+    "warning_code": "STACKING_SUBRUNS",
+    "message": "stacking/OOF model has many sub-runs per atomic execution",
+    "affected_phase": "all",
+    "suggested_action": "Profile one condition and run reduced grid first."
+  }
+]

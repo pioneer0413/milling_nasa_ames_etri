@@ -1,0 +1,72 @@
+experiment:
+  hypothesis_id: H4
+  scenario_id: S4
+  experiment_topic: overlapped_window_random_forest_ensemble_NASA_Ames_main_ABC
+  timestamp: auto
+  experiment_id: auto
+  execution_dir: auto
+  seed_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+  num_seeds: 30
+
+data:
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  target_col: VB
+  case_col: case
+  run_id_col: run
+  run_order_col: run
+  sensor_columns: [smcAC, smcDC, vib_spindle, vib_table, AE_spindle, AE_table]
+  selected_cases: [1, 2, 8, 9, 12, 14]
+
+domain:
+  condition_pairs:
+    A: [1, 9]
+    B: [2, 12]
+    C: [8, 14]
+  transfer_scenarios: [A_to_B, A_to_C, B_to_A, B_to_C, C_to_A, C_to_B]
+
+split:
+  validation_strategy: source_case_chronological
+  validation_ratio: 0.2
+  source_only_validation: true
+
+windowing:
+  method: overlapped_window
+  window_size: 3000
+  stride: 2000
+  num_windows: 4
+  target_length: 9000
+  run_length_handling:
+    if_longer: truncate_to_9000
+    if_shorter: pad_to_9000
+    padding_value: 0.0
+    use_mask_for_feature_extraction: true
+
+random_forest:
+  n_estimators: 500
+  max_depth: null
+  min_samples_leaf: 1
+  random_state: seed
+  n_jobs: -1
+
+ensemble:
+  validation_weighted_window_average:
+    fitted_on: source_validation_only
+    non_negative: true
+    sum_to_one: true
+  ridge_window_stacking:
+    alpha_candidates: [0.1, 1.0, 10.0]
+    fitted_on: source_validation_only
+    select_alpha_by: validation_RMSE
+  mlp_window_stacking:
+    hidden_dims: [16, 4]
+    epoch: 200
+    patience: 100
+    fitted_on: source_validation_only
+
+visualization:
+  rmse_filter_enabled: true
+  rmse_filter_threshold: 0.5
+  exclude_filtered_from_metrics: false
+  exclude_filtered_from_ranking: false
+  exclude_filtered_from_worst_shift_metrics: false

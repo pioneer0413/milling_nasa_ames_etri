@@ -16,6 +16,7 @@ from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
+from milling_experiment_framework.experiments.execution_path import execution_index_fields
 from milling_experiment_framework.experiments.s1_segment_execution import (
     CASE_SCOPE,
     DOMAIN_CASES,
@@ -44,12 +45,13 @@ class H1S1AssociationExecution:
         raw_config = self._read_config()
         experiment_id = datetime.now().strftime("%Y-%m-%d_%H%M%S_%f_H1_S1_segment_feature_VB_association_no_noload")
         paths = ExperimentPaths(self.root, experiment_id)
+        config = self._resolved_config(raw_config, experiment_id)
+        paths.apply_to_config(config)
         paths.prepare_standard_dirs()
         logger = ExperimentLogger(paths.execution_dir / "logs" / "run.log")
         logger.info(f"H1.S1 association execution started: {experiment_id}")
         if self.dry_run:
             logger.info("dry-run mode enabled")
-        config = self._resolved_config(raw_config, experiment_id)
         write_yaml(paths.execution_dir / "configs" / "input_config.yaml", raw_config)
         write_yaml(paths.execution_dir / "configs" / "resolved_config.yaml", config)
 
@@ -638,7 +640,7 @@ Explore whether sensor feature and VB association changes by cutting segment whi
 - Cases with few labeled dataset runs can produce unstable correlations.
 - Constant features are recorded as skipped for correlation.
 """
-        report.write_text(body, encoding="utf-8")
+        report.write_text(body + paths.report_metadata_markdown(), encoding="utf-8")
 
     def _write_html(self, paths: ExperimentPaths) -> None:
         md = paths.execution_dir / "reports" / "report.md"
@@ -658,6 +660,7 @@ Explore whether sensor feature and VB association changes by cutting segment whi
         index_path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "experiment_id": config["experiment"]["experiment_id"],
+            **execution_index_fields(config),
             "experiment_name": "H1_S1_segment_feature_VB_association_no_noload",
             "dataset": "mill_processed_enabled",
             "model": "none",

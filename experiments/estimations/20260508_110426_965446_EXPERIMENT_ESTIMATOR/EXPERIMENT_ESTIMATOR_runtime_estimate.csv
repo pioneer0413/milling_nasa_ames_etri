@@ -1,0 +1,12 @@
+phase,condition_group,model,atomic_executions,total_sub_runs,estimated_sec_per_atomic,estimated_total_sec,estimated_total_min,estimated_total_hours,runtime_estimation_method,assumption
+full,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+full,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+initial,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+initial,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+extra_seed,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+extra_seed,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+smoke,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+reduced,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+reduced,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+optional_ablation,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic
+optional_ablation,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,heuristic_default,built-in heuristic

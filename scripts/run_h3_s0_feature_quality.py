@@ -13,6 +13,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from milling_experiment_framework.analysis.feature_quality import run_feature_quality_analysis
+from milling_experiment_framework.experiments.execution_path import create_execution_dir
 from milling_experiment_framework.experiments.h2_s4_process_information_execution import PROCESS_FACTORS
 from milling_experiment_framework.experiments.s1_segment_execution import (
     DOMAIN_CASES,
@@ -35,7 +36,8 @@ def main() -> None:
 
     root = Path.cwd()
     experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_H3_S0_feature_quality_analysis_for_VB_prediction")
-    output_dir = root / args.output_root / experiment_id
+    path_config = {"experiment": {"experiment_id": experiment_id}}
+    output_dir = root / create_execution_dir(path_config, root=args.output_root)
     for dirname in ["configs", "data", "analysis", "figures", "reports", "logs"]:
         (output_dir / dirname).mkdir(parents=True, exist_ok=True)
     log_path = output_dir / "logs" / "H3_S0_run.log"

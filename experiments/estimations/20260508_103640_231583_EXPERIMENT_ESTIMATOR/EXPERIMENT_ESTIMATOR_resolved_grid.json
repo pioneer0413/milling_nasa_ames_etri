@@ -1,0 +1,396 @@
+{
+  "axes": {
+    "models": [
+      "cumulative_s_dnn"
+    ],
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "shifts": [
+      "A_to_B",
+      "A_to_C",
+      "B_to_A",
+      "B_to_C",
+      "C_to_A",
+      "C_to_B"
+    ],
+    "sensor_combinations": [
+      "current",
+      "vibration",
+      "acoustic",
+      "current_vibration",
+      "current_acoustic",
+      "vibration_acoustic",
+      "current_vibration_acoustic"
+    ],
+    "segment_settings": [
+      "full_length",
+      "steady",
+      "entry",
+      "exit",
+      "entry_steady",
+      "entry_exit",
+      "steady_exit"
+    ],
+    "feature_combinations": [
+      "default_feature"
+    ],
+    "process_combinations": [
+      "none"
+    ],
+    "input_representations": [
+      "cumulative"
+    ],
+    "modes": [
+      "s_dnn"
+    ],
+    "base_learners": [
+      "rnn",
+      "gru",
+      "lstm",
+      "cnn"
+    ],
+    "sequence_modes": [
+      "segment_mode"
+    ],
+    "hyperparameter_grid": [
+      "default_hparam"
+    ]
+  },
+  "phases": {
+    "full": {
+      "models": [
+        "cumulative_s_dnn"
+      ],
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "shifts": [
+        "A_to_B",
+        "A_to_C",
+        "B_to_A",
+        "B_to_C",
+        "C_to_A",
+        "C_to_B"
+      ],
+      "sensor_combinations": [
+        "current",
+        "vibration",
+        "acoustic",
+        "current_vibration",
+        "current_acoustic",
+        "vibration_acoustic",
+        "current_vibration_acoustic"
+      ],
+      "segment_settings": [
+        "full_length",
+        "steady",
+        "entry",
+        "exit",
+        "entry_steady",
+        "entry_exit",
+        "steady_exit"
+      ],
+      "feature_combinations": [
+        "default_feature"
+      ],
+      "process_combinations": [
+        "none"
+      ],
+      "input_representations": [
+        "cumulative"
+      ],
+      "modes": [
+        "s_dnn"
+      ],
+      "base_learners": [
+        "rnn",
+        "gru",
+        "lstm",
+        "cnn"
+      ],
+      "sequence_modes": [
+        "segment_mode"
+      ],
+      "hyperparameter_grid": [
+        "default_hparam"
+      ]
+    },
+    "initial": {
+      "models": [
+        "cumulative_s_dnn"
+      ],
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "shifts": [
+        "A_to_B",
+        "A_to_C",
+        "B_to_A",
+        "B_to_C",
+        "C_to_A",
+        "C_to_B"
+      ],
+      "sensor_combinations": [
+        "current",
+        "vibration",
+        "acoustic",
+        "current_vibration",
+        "current_acoustic",
+        "vibration_acoustic",
+        "current_vibration_acoustic"
+      ],
+      "segment_settings": [
+        "full_length",
+        "steady",
+        "entry",
+        "exit",
+        "entry_steady",
+        "entry_exit",
+        "steady_exit"
+      ],
+      "feature_combinations": [
+        "default_feature"
+      ],
+      "process_combinations": [
+        "none"
+      ],
+      "input_representations": [
+        "cumulative"
+      ],
+      "modes": [
+        "s_dnn"
+      ],
+      "base_learners": [
+        "rnn",
+        "gru",
+        "lstm",
+        "cnn"
+      ],
+      "sequence_modes": [
+        "segment_mode"
+      ],
+      "hyperparameter_grid": [
+        "default_hparam"
+      ]
+    },
+    "extra_seed": {
+      "models": [
+        "cumulative_s_dnn"
+      ],
+      "seeds": [
+        "none"
+      ],
+      "shifts": [
+        "A_to_B",
+        "A_to_C",
+        "B_to_A",
+        "B_to_C",
+        "C_to_A",
+        "C_to_B"
+      ],
+      "sensor_combinations": [
+        "current",
+        "vibration",
+        "acoustic",
+        "current_vibration",
+        "current_acoustic",
+        "vibration_acoustic",
+        "current_vibration_acoustic"
+      ],
+      "segment_settings": [
+        "full_length",
+        "steady",
+        "entry",
+        "exit",
+        "entry_steady",
+        "entry_exit",
+        "steady_exit"
+      ],
+      "feature_combinations": [
+        "default_feature"
+      ],
+      "process_combinations": [
+        "none"
+      ],
+      "input_representations": [
+        "cumulative"
+      ],
+      "modes": [
+        "s_dnn"
+      ],
+      "base_learners": [
+        "rnn",
+        "gru",
+        "lstm",
+        "cnn"
+      ],
+      "sequence_modes": [
+        "segment_mode"
+      ],
+      "hyperparameter_grid": [
+        "default_hparam"
+      ]
+    },
+    "smoke": {
+      "models": [
+        "cumulative_s_dnn"
+      ],
+      "seeds": [
+        0
+      ],
+      "shifts": [
+        "A_to_B"
+      ],
+      "sensor_combinations": [
+        "current"
+      ],
+      "segment_settings": [
+        "full_length"
+      ],
+      "feature_combinations": [
+        "default_feature"
+      ],
+      "process_combinations": [
+        "none"
+      ],
+      "input_representations": [
+        "cumulative"
+      ],
+      "modes": [
+        "s_dnn"
+      ],
+      "base_learners": [
+        "rnn",
+        "gru",
+        "lstm",
+        "cnn"
+      ],
+      "sequence_modes": [
+        "segment_mode"
+      ],
+      "hyperparameter_grid": [
+        "default_hparam"
+      ]
+    },
+    "reduced": {
+      "models": [
+        "cumulative_s_dnn"
+      ],
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "shifts": [
+        "A_to_B",
+        "A_to_C",
+        "B_to_A",
+        "B_to_C",
+        "C_to_A",
+        "C_to_B"
+      ],
+      "sensor_combinations": [
+        "current",
+        "acoustic",
+        "current_acoustic",
+        "current_vibration_acoustic"
+      ],
+      "segment_settings": [
+        "full_length",
+        "steady",
+        "entry_exit"
+      ],
+      "feature_combinations": [
+        "default_feature"
+      ],
+      "process_combinations": [
+        "none"
+      ],
+      "input_representations": [
+        "cumulative"
+      ],
+      "modes": [
+        "s_dnn"
+      ],
+      "base_learners": [
+        "rnn",
+        "gru",
+        "lstm",
+        "cnn"
+      ],
+      "sequence_modes": [
+        "segment_mode"
+      ],
+      "hyperparameter_grid": [
+        "default_hparam"
+      ]
+    },
+    "optional_ablation": {
+      "models": [
+        "cumulative_s_dnn"
+      ],
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "shifts": [
+        "A_to_B",
+        "A_to_C",
+        "B_to_A",
+        "B_to_C",
+        "C_to_A",
+        "C_to_B"
+      ],
+      "sensor_combinations": [
+        "current",
+        "vibration",
+        "acoustic",
+        "current_vibration",
+        "current_acoustic",
+        "vibration_acoustic",
+        "current_vibration_acoustic"
+      ],
+      "segment_settings": [
+        "full_length",
+        "steady",
+        "entry",
+        "exit",
+        "entry_steady",
+        "entry_exit",
+        "steady_exit"
+      ],
+      "feature_combinations": [
+        "default_feature"
+      ],
+      "process_combinations": [
+        "none"
+      ],
+      "input_representations": [
+        "cumulative"
+      ],
+      "modes": [
+        "s_dnn"
+      ],
+      "base_learners": [
+        "rnn",
+        "gru",
+        "lstm",
+        "cnn"
+      ],
+      "sequence_modes": [
+        "segment_mode"
+      ],
+      "hyperparameter_grid": [
+        "default_hparam"
+      ]
+    }
+  }
+}

@@ -21,6 +21,7 @@ from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
+from milling_experiment_framework.experiments.execution_path import execution_index_fields
 from milling_experiment_framework.experiments.s1_segment_execution import (
     CASE_SCOPE,
     DOMAIN_CASES,
@@ -86,6 +87,7 @@ class H2S4ProcessInformationExecution:
         experiment_id = self._generate_experiment_id()
         config = self._resolved_config(raw_config, run_config, experiment_id)
         paths = ExperimentPaths(self.root, experiment_id)
+        paths.apply_to_config(config)
         paths.prepare_standard_dirs()
         logger = ExperimentLogger(paths.execution_dir / "logs" / f"{PREFIX}_run.log")
         logger.info(f"H2.S4 execution started: {experiment_id}")
@@ -1039,7 +1041,7 @@ Dry-run completed.
 - RQ5: Inspect `analysis/H2_S4_process_only_vs_sensor_plus_process.csv`.
 - RQ6: Inspect `analysis/H2_S4_process_factor_contribution.csv`.
 """
-        report.write_text(body, encoding="utf-8")
+        report.write_text(body + paths.report_metadata_markdown(), encoding="utf-8")
 
     def _write_html(self, paths) -> None:
         md = paths.execution_dir / "reports" / f"{PREFIX}_report.md"
@@ -1055,6 +1057,7 @@ Dry-run completed.
         index_path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "experiment_id": config["experiment"]["experiment_id"],
+            **execution_index_fields(config),
             "experiment_name": "H2_S4_process_information_combination_effect_on_segment_aware_VB_prediction",
             "dataset": "mill_processed_enabled",
             "model": "random_forest,mlp",

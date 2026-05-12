@@ -10,6 +10,11 @@ def generate_report(path: Path, config: dict, metrics: dict, artifacts: dict) ->
 ## Overview
 
 - Experiment name: {config['experiment'].get('name')}
+- Hypothesis ID: {config['experiment'].get('hypothesis_id')}
+- Scenario ID: {config['experiment'].get('scenario_id')}
+- Experiment topic: {config['experiment'].get('experiment_topic')}
+- Execution dir: {config['experiment'].get('execution_dir')}
+- Path schema version: {config['experiment'].get('path_schema_version')}
 - Dataset: {config['dataset'].get('name')} ({config['dataset'].get('dataset_version')})
 - Model: {config['model'].get('name')} / {config['model'].get('model_type')} / {config['model'].get('input_type')}
 - Split strategy: {config['split'].get('strategy')}

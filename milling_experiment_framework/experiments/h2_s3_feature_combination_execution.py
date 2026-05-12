@@ -13,6 +13,7 @@ from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
+from milling_experiment_framework.experiments.execution_path import execution_index_fields
 from milling_experiment_framework.experiments.s1_segment_execution import (
     CASE_SCOPE,
     DOMAIN_CASES,
@@ -60,6 +61,7 @@ class H2S3FeatureCombinationExecution:
         experiment_id = self._generate_experiment_id()
         config = self._resolved_config(raw_config, run_config, experiment_id)
         paths = ExperimentPaths(self.root, experiment_id)
+        paths.apply_to_config(config)
         paths.prepare_standard_dirs()
         logger = ExperimentLogger(paths.execution_dir / "logs" / "run.log")
         logger.info(f"H2.S3 execution started: {experiment_id}")
@@ -854,7 +856,7 @@ Evaluate whether statistics, shape, frequency, and their combinations improve se
 - RQ3: Segment-aware effect is supported when non-baseline segment settings improve over `full_length` or `steady` in `analysis/segment_effect_under_feature_combination.csv`.
 - RQ4: Best segment varies by feature combination when `analysis/best_segment_by_feature_combination.csv` contains multiple best segment settings.
 """
-        report.write_text(body, encoding="utf-8")
+        report.write_text(body + paths.report_metadata_markdown(), encoding="utf-8")
 
     def _write_html(self, paths) -> None:
         md = paths.execution_dir / "reports" / "report.md"
@@ -878,6 +880,7 @@ Evaluate whether statistics, shape, frequency, and their combinations improve se
         index_path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "experiment_id": config["experiment"]["experiment_id"],
+            **execution_index_fields(config),
             "experiment_name": "H2_S3_feature_combination_effect_on_segment_aware_VB_prediction_all_sensors",
             "dataset": "mill_processed_enabled",
             "model": "random_forest,mlp",

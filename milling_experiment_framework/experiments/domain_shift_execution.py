@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from milling_experiment_framework.core.config import load_and_resolve_config
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
+from milling_experiment_framework.experiments.execution_path import execution_index_fields
 from milling_experiment_framework.reports.report_generator import generate_report
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
@@ -49,6 +50,7 @@ class DomainShiftExecution:
         input_config, config, validation = load_and_resolve_config(self.config_path)
         experiment_id = config["experiment"]["experiment_id"]
         paths = ExperimentPaths(self.root, experiment_id)
+        paths.apply_to_config(config)
         paths.prepare_standard_dirs()
         logger = ExperimentLogger(paths.execution_dir / "logs" / "run.log")
         logger.info(f"domain_shift_execution started: {experiment_id}")
@@ -345,6 +347,7 @@ class DomainShiftExecution:
         index_path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "experiment_id": config["experiment"]["experiment_id"],
+            **execution_index_fields(config),
             "experiment_name": config["experiment"].get("name"),
             "dataset": config["dataset"].get("name"),
             "model": config["model"].get("name"),

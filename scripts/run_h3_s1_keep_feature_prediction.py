@@ -28,6 +28,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from milling_experiment_framework.experiments.execution_path import create_execution_dir, find_experiment_dirs
 from milling_experiment_framework.experiments.s1_segment_execution import (
     DOMAIN_CASES,
     FEATURE_NAMES,
@@ -51,7 +52,8 @@ def main() -> None:
 
     root = Path.cwd()
     experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_H3_S1_keep_feature_subset_VB_prediction")
-    output = root / "experiments" / "executions" / experiment_id
+    path_config = {"experiment": {"experiment_id": experiment_id}}
+    output = Path(create_execution_dir(path_config, root=root / "experiments" / "executions"))
     for dirname in ["configs", "data", "splits", "preprocessing", "metrics", "predictions", "analysis", "figures", "reports", "logs"]:
         (output / dirname).mkdir(parents=True, exist_ok=True)
     run_log = output / "logs" / f"{PREFIX}_run.log"
@@ -130,6 +132,7 @@ def main() -> None:
             "seeds": run_config.seeds,
             "models": run_config.models,
         }
+        config["experiment"].update(path_config["experiment"])
         write_yaml_like(output / "configs" / f"{PREFIX}_input_config.yaml", config)
         write_yaml_like(output / "configs" / f"{PREFIX}_resolved_config.yaml", config)
 
@@ -200,10 +203,14 @@ def main() -> None:
 
 
 def find_latest_h3_s0(root: Path) -> Path:
-    candidates = sorted((root / "experiments" / "executions").glob("*H3_S0_feature_quality_analysis_for_VB_prediction*"))
+    candidates = [
+        Path(p)
+        for p in find_experiment_dirs(root / "experiments" / "executions", hypothesis_id="H3", scenario_id="S0", include_legacy=True)
+        if "feature_quality_analysis_for_VB_prediction" in Path(p).name
+    ]
     if not candidates:
         raise FileNotFoundError("No H3_S0 feature quality execution directory found.")
-    return candidates[-1]
+    return sorted(candidates)[-1]
 
 
 def read_recommendation(path: Path) -> pd.DataFrame:

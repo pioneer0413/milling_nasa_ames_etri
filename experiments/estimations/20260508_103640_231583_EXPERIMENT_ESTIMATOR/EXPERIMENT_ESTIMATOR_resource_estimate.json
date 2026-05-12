@@ -1,0 +1,17 @@
+{
+  "estimation_id": "20260508_103640_231583_EXPERIMENT_ESTIMATOR",
+  "experiment_name": "estimator_cumulative_s_dnn",
+  "total_atomic_executions": 882,
+  "total_sub_runs": 18522,
+  "estimated_wall_clock_hours": 147.0,
+  "estimated_gpu_hours": 147.0,
+  "estimated_cpu_hours": 36.75,
+  "estimated_memory_requirement_mb": 521.0,
+  "estimated_disk_usage_mb": 185309.363,
+  "estimated_checkpoint_count": 37044,
+  "estimated_prediction_rows": 44100,
+  "estimated_metric_rows": 882,
+  "estimated_figure_count": 17,
+  "warning_level": "CRITICAL",
+  "generated_at": "2026-05-08T10:36:40"
+}

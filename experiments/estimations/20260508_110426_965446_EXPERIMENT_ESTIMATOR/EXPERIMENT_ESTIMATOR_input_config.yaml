@@ -1,0 +1,155 @@
+model:
+  name: cumulative_s_dnn
+  input_type: timeseries
+  task_type: regression
+  target_col: VB
+  paper_target_name: RUL
+  framework_target_name: VB
+  sensor_setting: all_sensors
+  sequence:
+    construction_mode: paper_style_sliding_window
+    window_size: 1024
+    stride: 80
+    segment_mode: full_length
+    resample_length: 1024
+    exclude_no_load: true
+  input_representation: cumulative
+  base_learners:
+    rnn:
+      enabled: true
+      hidden_sizes:
+      - 128
+      - 64
+      hidden_size: 64
+      num_layers: 2
+      dropout: 0.5
+      batch_first: true
+    gru:
+      enabled: true
+      hidden_size: 32
+      num_layers: 1
+      dropout: 0.5
+      batch_first: true
+    lstm:
+      enabled: true
+      hidden_size: 32
+      num_layers: 1
+      dropout: 0.5
+      batch_first: true
+    cnn:
+      enabled: true
+      channels:
+      - 128
+      - 64
+      - 32
+      kernel_size: 3
+      dropout: 0.5
+      pooling: max
+  base_regression_head:
+    hidden_dims:
+    - 64
+    activation: relu
+    dropout: 0.5
+    output_dim: 1
+  ensemble:
+    enabled: true
+    meta_model: ridge_adaboost
+    cv_folds: 5
+    n_estimators_cumulative: 26
+    n_estimators_raw: 11
+    learning_rate: 0.006
+    use_out_of_fold_predictions: true
+    oof_scope: source_domain_only
+training:
+  loss: mse
+  optimizer: adam
+  learning_rate: 0.001
+  batch_size: 128
+  max_epochs: 100
+  early_stopping:
+    enabled: true
+    monitor: val_rmse
+    patience: 20
+    mode: min
+checkpoint:
+  enabled: true
+  save_best: true
+  save_last: true
+  monitor: val_rmse
+  mode: min
+preprocessing:
+  sequence_scaler: zscore
+  fit_scaler_on_train_only: true
+  cumulative_descriptor_order: after_scaling
+  target_scaler: none
+data:
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
+  cases:
+  - 1
+  - 2
+  - 8
+  - 9
+  - 12
+  - 14
+  expected_sensors:
+  - smcAC
+  - smcDC
+  - vib_spindle
+  - vib_table
+  - AE_spindle
+  - AE_table
+experiment:
+  cases:
+  - 1
+  - 2
+  - 8
+  - 9
+  - 12
+  - 14
+  domain_pairs:
+    A:
+    - 1
+    - 9
+    B:
+    - 2
+    - 12
+    C:
+    - 8
+    - 14
+  shifts:
+  - - A
+    - B
+  - - A
+    - C
+  - - B
+    - A
+  - - B
+    - C
+  - - C
+    - A
+  - - C
+    - B
+  seeds:
+  - 0
+  - 1
+  - 2
+protocol:
+  split_type: domain_shift
+  train_on: source_domain_only
+  test_on: target_domain_only
+  validation_scope: source_domain_only
+  preprocessing_fit_scope: source_train_only
+  meta_learner_fit_scope: source_oof_only
+  target_domain_usage: evaluation_only
+runtime:
+  modes:
+  - base_only
+  - s_dnn
+  input_representations:
+  - cumulative
+  shifts:
+  - A_to_B
+  seeds:
+  - 0

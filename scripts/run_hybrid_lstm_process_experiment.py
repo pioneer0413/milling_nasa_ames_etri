@@ -29,6 +29,7 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from milling_experiment_framework.experiment_logging.environment import collect_environment
+from milling_experiment_framework.experiments.execution_path import create_execution_dir
 from milling_experiment_framework.models.dl.hybrid_lstm_process import HybridLSTMProcessRegressor
 
 
@@ -156,7 +157,8 @@ def main() -> None:
         config = load_config(Path(args.config))
         apply_cli_overrides(config, args)
         experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_H3_S2_hybrid_lstm_process_architecture")
-        output_dir = Path("experiments") / "executions" / experiment_id
+        path_config = {"experiment": {"experiment_id": experiment_id}}
+        output_dir = Path(create_execution_dir(path_config, root=Path("experiments") / "executions"))
         prepare_dirs(output_dir)
         logger = make_logger(output_dir / "logs" / f"{PREFIX}_run.log")
         device = torch.device("cuda" if torch.cuda.is_available() and config.get("training", {}).get("device") == "cuda" else "cpu")
@@ -165,7 +167,7 @@ def main() -> None:
         write_json(output_dir / "logs" / f"{PREFIX}_environment.json", collect_environment())
         write_json(output_dir / "configs" / f"{PREFIX}_input_config.yaml", config)
         resolved = copy.deepcopy(config)
-        resolved["experiment"] = {"experiment_id": experiment_id, "created_at": datetime.now().isoformat(timespec="seconds")}
+        resolved["experiment"] = {**path_config["experiment"], "experiment_id": experiment_id, "created_at": datetime.now().isoformat(timespec="seconds")}
         write_json(output_dir / "configs" / f"{PREFIX}_resolved_config.yaml", resolved)
         write_implementation_summary(output_dir)
 

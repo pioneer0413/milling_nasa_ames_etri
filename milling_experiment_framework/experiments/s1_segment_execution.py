@@ -23,6 +23,7 @@ from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
+from milling_experiment_framework.experiments.execution_path import execution_index_fields
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
@@ -83,6 +84,7 @@ class S1SegmentExecution:
         experiment_id = self._generate_experiment_id()
         resolved_config = self._resolved_config(raw_config, run_config, experiment_id)
         paths = ExperimentPaths(self.root, experiment_id)
+        paths.apply_to_config(resolved_config)
         paths.prepare_standard_dirs()
         logger = ExperimentLogger(paths.execution_dir / "logs" / "run.log")
         logger.info(f"S1 execution started: {experiment_id}")
@@ -844,7 +846,7 @@ H1.S1 association reference unavailable. RQ4 is deferred.
 - No hyperparameter tuning was performed.
 - MLP convergence warnings are suppressed and defaults are recorded in resolved config.
 """
-        report.write_text(body, encoding="utf-8")
+        report.write_text(body + paths.report_metadata_markdown(), encoding="utf-8")
 
     def _write_report_html(self, paths: ExperimentPaths) -> None:
         md = paths.execution_dir / "reports" / "report.md"
@@ -869,6 +871,7 @@ H1.S1 association reference unavailable. RQ4 is deferred.
         index_path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "experiment_id": config["experiment"]["experiment_id"],
+            **execution_index_fields(config),
             "experiment_name": "S1_segment_setting_effect_on_VB_prediction",
             "dataset": "mill_processed_enabled",
             "model": "random_forest,mlp",

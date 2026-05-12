@@ -1,0 +1,16 @@
+experiment:
+  name: estimator_h2_s2
+models: [random_forest, mlp]
+seeds:
+  seed_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+runtime:
+  shifts: [A_to_B, A_to_C, B_to_A, B_to_C, C_to_A, C_to_B]
+sensor_combinations: [current, vibration, acoustic, current_vibration, current_acoustic, vibration_acoustic, current_vibration_acoustic]
+preprocessing:
+  segment_settings: [full_length, steady, entry, exit, entry_steady, entry_exit, steady_exit]
+estimation:
+  phase: full
+  runtime_per_atomic_sec:
+    random_forest: 5
+    mlp: 30
+

@@ -1,0 +1,35 @@
+model_design:
+  run_encoder:
+    type: windowed_cnn
+    input_channels: 6
+    window_length: 3000
+    num_windows: 5
+    stride: auto
+    short_run_policy: pad_to_window_length
+    window_aggregation: max_pool
+    latent_dim: 32
+  cnn_encoder:
+    channels: [16, 32]
+    kernel_size: 5
+    use_batch_norm: true
+    activation: relu
+    temporal_pooling: global_average_pooling
+    dropout: 0.0
+  cnn_only:
+    enabled: true
+    head_hidden_dim: 32
+    dropout: 0.0
+  cnn_lag_concat:
+    enabled: true
+    sequence_size: 3
+    include_mask: true
+    head_hidden_dim: 64
+    dropout: 0.0
+  cnn_gru:
+    enabled: true
+    sequence_size: 3
+    gru_hidden_size: 32
+    gru_num_layers: 1
+    bidirectional: false
+    dropout: 0.0
+    head_hidden_dim: 32

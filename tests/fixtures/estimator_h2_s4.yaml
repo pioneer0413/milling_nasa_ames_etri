@@ -1,0 +1,32 @@
+experiment:
+  name: estimator_h2_s4
+models: [random_forest, mlp]
+feature_groups: [sensor_only, process_only, sensor_plus_process]
+seeds:
+  seed_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+runtime:
+  shifts: [A_to_B, A_to_C, B_to_A, B_to_C, C_to_A, C_to_B]
+preprocessing:
+  segment_settings: [full_length, steady, entry, exit, entry_steady, entry_exit, steady_exit]
+process_combinations:
+  - doc
+  - feed
+  - material
+  - time
+  - doc_feed
+  - doc_material
+  - doc_time
+  - feed_material
+  - feed_time
+  - material_time
+  - doc_feed_material
+  - doc_feed_time
+  - doc_material_time
+  - feed_material_time
+  - doc_feed_material_time
+estimation:
+  phase: full
+  runtime_per_atomic_sec:
+    random_forest: 5
+    mlp: 30
+
