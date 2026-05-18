@@ -1,6 +1,6 @@
 experiment:
   experiment_id: null
-  name: S2_sensor_combination_effect_on_segment_aware_VB_prediction
+  name: H1_S1_feture_VB_segment_association_eda
   analysis_type: Exploratory
 
 dataset:
@@ -11,15 +11,12 @@ dataset:
   dataset_version: enabled_cases_with_heuristic_segments_v1
 
 task:
-  type: regression
+  type: exploratory_association_analysis
   target_column: VB
 
 preprocessing:
   output_type: features
   no_load_excluded: true
-  feature_scaling:
-    enabled: true
-    fit_on: train
   segment_settings:
     - full_length
     - steady
@@ -28,26 +25,30 @@ preprocessing:
     - entry_steady
     - entry_exit
     - steady_exit
+  feature_names:
+    - mean
+    - std
+    - max
+    - min
+    - peak_to_peak
+    - kurtosis
+    - skewness
+    - spectral_centroid
+    - band_energy
 
-models:
-  - random_forest
-  - mlp
-
-model_defaults:
-  random_forest:
-    n_jobs: -1
-  mlp:
-    hidden_layer_sizes: [64, 32, 16]
-    max_iter: 300
-    learning_rate_init: 0.001
-
-seeds:
-  initial_seeds: [0, 1, 2]
-  extra_seeds: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
-  seed_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
-
-evaluation:
-  metrics: [mae, rmse, r2, pearson, spearman]
+analysis:
+  input_type: feature_table
+  association_measures:
+    - pearson
+    - spearman
+    - mutual_information
+  deferred_measures:
+    - distance_correlation
+    - kendall_tau
+  ranking:
+    primary: top3_mean_abs_spearman
+    secondary: top3_mean_abs_pearson
+    tertiary: top3_mean_mutual_information
 
 report:
   enabled: true

@@ -33,6 +33,7 @@ preprocessing:
     - entry_steady
     - entry_exit
     - steady_exit
+    - entry_steady_exit
 
 process_factors:
   A:

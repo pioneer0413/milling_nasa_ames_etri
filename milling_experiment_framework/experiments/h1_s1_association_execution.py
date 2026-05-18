@@ -43,7 +43,7 @@ class H1S1AssociationExecution:
 
     def run(self) -> dict[str, Any]:
         raw_config = self._read_config()
-        experiment_id = datetime.now().strftime("%Y-%m-%d_%H%M%S_%f_H1_S1_segment_feature_VB_association_no_noload")
+        experiment_id = datetime.now().strftime("%Y-%m-%d_%H%M%S_%f_H1_S1_feture_VB_segment_association_eda")
         paths = ExperimentPaths(self.root, experiment_id)
         config = self._resolved_config(raw_config, experiment_id)
         paths.apply_to_config(config)
@@ -581,7 +581,7 @@ Dry-run completed.
             best_counts = pd.Series(summary["best_segment_count_by_spearman"]).to_string()
             full_better = results["baseline_comparison"].query("baseline == 'full_length' and improved_vs_baseline_spearman").head(15)
             steady_better = results["baseline_comparison"].query("baseline == 'steady' and improved_vs_baseline_spearman").head(15)
-            body = f"""# H1.S1 Segment Feature - VB Association EDA
+            body = f"""# H1_S1 feture_VB_segment_association_eda
 
 ## Objective
 
@@ -661,7 +661,7 @@ Explore whether sensor feature and VB association changes by cutting segment whi
         row = {
             "experiment_id": config["experiment"]["experiment_id"],
             **execution_index_fields(config),
-            "experiment_name": "H1_S1_segment_feature_VB_association_no_noload",
+            "experiment_name": "H1_S1_feture_VB_segment_association_eda",
             "dataset": "mill_processed_enabled",
             "model": "none",
             "input_type": "feature_table",

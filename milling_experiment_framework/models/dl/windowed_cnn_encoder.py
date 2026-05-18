@@ -13,6 +13,10 @@ class WindowedCNNConfig:
     window_length: int = 3000
     channels: tuple[int, ...] = (16, 32)
     kernel_size: int = 5
+    # Kept for backward compatibility with existing configs.
+    # In the revised encoder, the primary representation is a (B, W') vector,
+    # and this value is typically used by downstream models (e.g. an embedding
+    # dimension before a GRU) rather than being produced directly by the encoder.
     latent_dim: int = 32
     use_batch_norm: bool = True
     dropout: float = 0.0
@@ -26,31 +30,65 @@ def _make_cnn(
     use_batch_norm: bool,
     dropout: float,
 ) -> nn.Sequential:
+    """Build a sensor-wise temporal CNN.
+
+    This CNN preserves the input channel count (sensor identity) by using
+    depthwise convolutions (groups = input_channels). It performs *temporal*
+    convolution within each window independently and preserves the time axis
+    length (via padding), so callers can pool across the window axis later.
+
+    Note: ``channels`` is used only to determine the number of stacked blocks
+    (its values are ignored) to remain compatible with existing configs.
+    """
+
     layers: list[nn.Module] = []
     in_channels = int(input_channels)
+    if in_channels <= 0:
+        raise ValueError("input_channels must be positive")
+    if not channels:
+        raise ValueError("channels must not be empty")
+
     padding = int(kernel_size) // 2
-    for layer_idx, out_channels in enumerate(channels):
-        layers.append(nn.Conv1d(in_channels, int(out_channels), kernel_size=int(kernel_size), padding=padding))
+    num_blocks = len(channels)
+    for _layer_idx in range(num_blocks):
+        layers.append(
+            nn.Conv1d(
+                in_channels,
+                in_channels,
+                kernel_size=int(kernel_size),
+                padding=padding,
+                groups=in_channels,
+            )
+        )
         if use_batch_norm:
-            layers.append(nn.BatchNorm1d(int(out_channels)))
+            layers.append(nn.BatchNorm1d(in_channels))
         layers.append(nn.ReLU())
-        if layer_idx == 0:
-            layers.append(nn.MaxPool1d(kernel_size=2))
         if float(dropout) > 0.0:
             layers.append(nn.Dropout(float(dropout)))
-        in_channels = int(out_channels)
-    layers.append(nn.AdaptiveAvgPool1d(1))
-    layers.append(nn.Flatten())
     return nn.Sequential(*layers)
 
 
 class WindowedCNNEncoder(nn.Module):
-    """Shared-window CNN run encoder.
+    """Windowed sensor-wise CNN encoder with window-axis max pooling.
 
-    Input shape is ``[batch, num_windows, num_sensors, window_length]``.
-    The same CNN is applied to every window, producing window-level latents
-    ``[batch, num_windows, latent_dim]``. Run-level latent ``z_t`` is max-pooled
-    over the window axis.
+    Revised behavior (compared to the original implementation kept in
+    ``windowed_cnn_encoder_original.py``):
+
+    - Preserves sensor channels during the first CNN stage via depthwise conv.
+    - Pools over the window axis (K) to pick the strongest activation per sensor.
+    - Produces a per-run 1D representation over time: ``[B, W']``.
+
+    Pipeline summary:
+
+    1) ``(B,C,K,W) -> (B,C,K,W')`` depthwise temporal conv per window
+    2) ``(B,C,K,W') -> (B,C,1,W')`` max over K
+    3) ``(B,C,1,W') -> (B,1,1,W')`` pointwise (1x1) conv across channels
+    4) ``(B,1,1,W') -> (B,W')`` squeeze
+
+    Accepted input layouts:
+
+    - ``[B, C, K, W]`` (preferred)
+    - ``[B, K, C, W]`` (legacy; auto-detected)
     """
 
     def __init__(
@@ -88,26 +126,67 @@ class WindowedCNNEncoder(nn.Module):
         self.window_length = int(window_length)
         self.latent_dim = int(latent_dim)
         self.aggregation = aggregation
-        self.cnn = _make_cnn(input_channels, channels, kernel_size, use_batch_norm, dropout)
-        self.proj = nn.Sequential(nn.Linear(int(channels[-1]), self.latent_dim), nn.ReLU())
+        self.sensor_cnn = _make_cnn(input_channels, channels, kernel_size, use_batch_norm, dropout)
+        # Mix sensors into a single-channel temporal representation.
+        self.mix_cnn = nn.Sequential(
+            nn.Conv1d(self.input_channels, 1, kernel_size=1, padding=0),
+            nn.ReLU(),
+        )
+        # Depthwise conv uses padding that preserves time length.
+        self.output_length = int(self.window_length)
+
+    @property
+    def output_dim(self) -> int:
+        """Dimensionality of the produced per-run vector representation."""
+
+        return int(self.output_length)
+
+    def _normalize_input_layout(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalize x to [B, C, K, W] and validate expected sizes."""
+
+        if x.ndim != 4:
+            raise ValueError(f"WindowedCNNEncoder expects a 4D tensor, got {tuple(x.shape)}")
+        b, d1, d2, w = x.shape
+        if w != self.window_length:
+            raise ValueError(f"Expected window_length={self.window_length}, got {w}")
+
+        # Preferred: [B, C, K, W]
+        if d1 == self.input_channels and d2 == self.num_windows:
+            return x
+        # Legacy: [B, K, C, W]
+        if d1 == self.num_windows and d2 == self.input_channels:
+            return x.permute(0, 2, 1, 3)
+
+        raise ValueError(
+            "WindowedCNNEncoder expects [B,C,K,W] or [B,K,C,W] with "
+            f"C={self.input_channels}, K={self.num_windows}, W={self.window_length}; got {tuple(x.shape)}"
+        )
 
     def forward(self, x: torch.Tensor, return_window_latents: bool = False):
-        if x.ndim != 4:
-            raise ValueError(f"WindowedCNNEncoder expects [B,K,C,W], got {tuple(x.shape)}")
-        batch_size, num_windows, num_channels, window_length = x.shape
-        if num_windows != self.num_windows:
-            raise ValueError(f"Expected num_windows={self.num_windows}, got {num_windows}")
-        if num_channels != self.input_channels:
-            raise ValueError(f"Expected input_channels={self.input_channels}, got {num_channels}")
-        if window_length != self.window_length:
-            raise ValueError(f"Expected window_length={self.window_length}, got {window_length}")
-        x_flat = x.reshape(batch_size * num_windows, num_channels, window_length)
-        h_flat = self.proj(self.cnn(x_flat))
-        window_latents = h_flat.reshape(batch_size, num_windows, self.latent_dim)
-        z, _ = torch.max(window_latents, dim=1)
+        x = self._normalize_input_layout(x)  # [B, C, K, W]
+        batch_size, num_channels, num_windows, window_length = x.shape
+
+        # Apply the same sensor-wise CNN to each window independently.
+        x_flat = x.permute(0, 2, 1, 3).reshape(batch_size * num_windows, num_channels, window_length)
+        h_flat = self.sensor_cnn(x_flat)  # [B*K, C, W']
+        _, _, w_out = h_flat.shape
+        if w_out != self.output_length:
+            # Keep a strict check so downstream dims remain predictable.
+            raise RuntimeError(f"Unexpected output_length={w_out}, expected {self.output_length}")
+
+        h = h_flat.reshape(batch_size, num_windows, num_channels, w_out).permute(0, 2, 1, 3)  # [B, C, K, W']
+        # Window-axis max pooling: select strongest activation among windows per sensor.
+        h_max = h.max(dim=2, keepdim=True).values  # [B, C, 1, W']
+
+        # Mix sensors into a single temporal representation and squeeze.
+        y = self.mix_cnn(h_max.squeeze(2)).squeeze(1)  # [B, W']
+
         if return_window_latents:
-            return z, window_latents
-        return z
+            # Provide a per-window temporal representation for diagnostics/tests:
+            # mean over sensors => [B, K, W'].
+            window_latents = h.mean(dim=1).permute(0, 1, 2)  # [B, K, W']
+            return y, window_latents
+        return y
 
 
 class RegressionHead(nn.Module):

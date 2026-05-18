@@ -29,6 +29,7 @@ preprocessing:
     - entry_steady
     - entry_exit
     - steady_exit
+    - entry_steady_exit
 
 feature_groups:
   statistics: [mean, std, max, min, peak_to_peak]

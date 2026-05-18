@@ -37,7 +37,7 @@ from milling_experiment_framework.utils.paths import ExperimentPaths
 CASE_SCOPE = [1, 2, 8, 9, 12, 14]
 PAIR_DEFINITION = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
 PAIR_BY_CASE = {case: pair for pair, cases in PAIR_DEFINITION.items() for case in cases}
-SEGMENT_SETTINGS = ["full_length", "steady", "entry", "exit", "entry_steady", "entry_exit", "steady_exit"]
+SEGMENT_SETTINGS = ["full_length", "steady", "entry", "exit", "entry_steady", "entry_exit", "steady_exit", "entry_steady_exit"]
 EXCLUDED_SEGMENTS = ["no_load", "no_load_entry", "no_load_steady", "no_load_exit"]
 TARGET_FEATURES = [
     "mean",
@@ -126,7 +126,7 @@ def identify_segment_settings(df: pd.DataFrame) -> pd.DataFrame:
                     "used": False,
                     "definition": "excluded no-load related segment",
                     "source_available": True,
-                    "excluded_reason": "no-load segments are out of H1_S4 scope",
+                    "excluded_reason": "no-load segments are out of H1_S2 scope",
                 }
             )
     return pd.DataFrame(rows)
@@ -332,50 +332,50 @@ def create_suitability_heatmaps(
         sns.set_theme(style="whitegrid")
     _heatmap(
         feature_segment.pivot_table(index="feature_name", columns="segment_setting", values="mean_suitability", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
-        "H1_S4 Feature x Segment Primary Suitability (harmonic mean)",
-        figure_dir / "H1_S4_feature_segment_suitability_heatmap.png",
+        "H1_S2 Feature x Segment Primary Suitability (harmonic mean)",
+        figure_dir / "H1_S2_feature_segment_suitability_heatmap.png",
         vmax=1,
         label="Primary suitability (harmonic mean)",
     )
     _heatmap(
         feature_segment.pivot_table(index="feature_name", columns="segment_setting", values="suitability_harmonic_mean", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
-        "H1_S4 Feature x Segment Suitability Harmonic Mean",
-        figure_dir / "H1_S4_feature_segment_suitability_heatmap_harmonic_mean.png",
+        "H1_S2 Feature x Segment Suitability Harmonic Mean",
+        figure_dir / "H1_S2_feature_segment_suitability_heatmap_harmonic_mean.png",
         vmax=1,
         label="Suitability harmonic mean",
     )
     _heatmap(
         feature_segment.pivot_table(index="feature_name", columns="segment_setting", values="suitability_sum_legacy", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
-        "H1_S4 Feature x Segment Suitability Sum Legacy",
-        figure_dir / "H1_S4_feature_segment_suitability_heatmap_sum_legacy.png",
+        "H1_S2 Feature x Segment Suitability Sum Legacy",
+        figure_dir / "H1_S2_feature_segment_suitability_heatmap_sum_legacy.png",
         vmax=2,
         label="Suitability sum legacy = M + T",
     )
     _heatmap(
         method_comparison.assign(rank_change_abs=method_comparison["rank_change_abs"]).pivot_table(index="feature_name", columns="segment_setting", values="rank_change_abs", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
-        "H1_S4 Mean Rank Change Abs: Sum Legacy vs Harmonic",
-        figure_dir / "H1_S4_suitability_rank_change_heatmap.png",
+        "H1_S2 Mean Rank Change Abs: Sum Legacy vs Harmonic",
+        figure_dir / "H1_S2_suitability_rank_change_heatmap.png",
         vmax=None,
         label="Mean absolute rank change",
     )
     _heatmap(
         overall.pivot_table(index="sensor_name", columns="segment_setting", values="mean_suitability", aggfunc="mean").reindex(columns=SEGMENT_SETTINGS),
-        "H1_S4 Sensor x Segment Suitability",
-        figure_dir / "H1_S4_sensor_segment_suitability_heatmap.png",
+        "H1_S2 Sensor x Segment Suitability",
+        figure_dir / "H1_S2_sensor_segment_suitability_heatmap.png",
         vmax=1,
         label="Primary suitability (harmonic mean)",
     )
     _heatmap(
         overall.pivot_table(index="sensor_group", columns="segment_setting", values="mean_suitability", aggfunc="mean").reindex(columns=SEGMENT_SETTINGS),
-        "H1_S4 Sensor Group x Segment Suitability",
-        figure_dir / "H1_S4_sensor_group_segment_suitability_heatmap.png",
+        "H1_S2 Sensor Group x Segment Suitability",
+        figure_dir / "H1_S2_sensor_group_segment_suitability_heatmap.png",
         vmax=1,
         label="Primary suitability (harmonic mean)",
     )
     _heatmap(
         pair_level.pivot_table(index="pair_id", columns="segment_setting", values="mean_suitability", aggfunc="mean").reindex(index=["A", "B", "C"], columns=SEGMENT_SETTINGS),
-        "H1_S4 Pair x Segment Suitability",
-        figure_dir / "H1_S4_pair_segment_suitability_heatmap.png",
+        "H1_S2 Pair x Segment Suitability",
+        figure_dir / "H1_S2_pair_segment_suitability_heatmap.png",
         vmax=1,
         label="Primary suitability (harmonic mean)",
     )
@@ -403,13 +403,13 @@ def create_suitability_heatmaps(
                 alpha=0.85,
             )
         plt.legend(fontsize=8, loc="best")
-    plt.title("H1_S4 Monotonicity vs Trendability")
+    plt.title("H1_S2 Monotonicity vs Trendability")
     plt.xlabel("Mean monotonicity")
     plt.ylabel("Mean trendability")
     plt.xlim(0, 1.02)
     plt.ylim(0, 1.02)
     plt.tight_layout()
-    plt.savefig(figure_dir / "H1_S4_monotonicity_vs_trendability_scatter.png", dpi=180)
+    plt.savefig(figure_dir / "H1_S2_monotonicity_vs_trendability_scatter.png", dpi=180)
     plt.close()
 
     plt.figure(figsize=(8, 6))
@@ -426,11 +426,11 @@ def create_suitability_heatmaps(
         for segment, group in feature_segment.groupby("segment_setting"):
             plt.scatter(group["suitability_sum_legacy"], group["suitability_harmonic_mean"], s=60, label=segment, alpha=0.85)
         plt.legend(fontsize=8)
-    plt.title("H1_S4 Sum Legacy vs Harmonic Suitability")
+    plt.title("H1_S2 Sum Legacy vs Harmonic Suitability")
     plt.xlabel("Suitability sum legacy = M + T")
     plt.ylabel("Suitability harmonic mean")
     plt.tight_layout()
-    plt.savefig(figure_dir / "H1_S4_sum_vs_harmonic_suitability_scatter.png", dpi=180)
+    plt.savefig(figure_dir / "H1_S2_sum_vs_harmonic_suitability_scatter.png", dpi=180)
     plt.close()
 
     plt.figure(figsize=(9, 6))
@@ -447,17 +447,17 @@ def create_suitability_heatmaps(
         linewidth=0.2,
     )
     plt.colorbar(scatter, label="Suitability harmonic mean")
-    plt.title("H1_S4 Monotonicity vs Trendability with Harmonic Suitability")
+    plt.title("H1_S2 Monotonicity vs Trendability with Harmonic Suitability")
     plt.xlabel("Mean monotonicity")
     plt.ylabel("Mean trendability")
     plt.xlim(0, 1.02)
     plt.ylim(0, 1.02)
     plt.tight_layout()
-    plt.savefig(figure_dir / "H1_S4_monotonicity_vs_trendability_with_suitability.png", dpi=180)
+    plt.savefig(figure_dir / "H1_S2_monotonicity_vs_trendability_with_suitability.png", dpi=180)
     plt.close()
 
 
-def write_H1_S4_report(
+def write_H1_S2_report(
     output_dir: Path,
     context: dict[str, Any],
     feature_definition: pd.DataFrame,
@@ -468,7 +468,7 @@ def write_H1_S4_report(
     pair_level: pd.DataFrame,
     top_bottom: pd.DataFrame,
 ) -> None:
-    report_path = output_dir / "reports" / "H1_S4_report.md"
+    report_path = output_dir / "reports" / "H1_S2_report.md"
     top10 = simplified.sort_values("suitability", ascending=False).head(10)
     bottom10 = simplified.sort_values("suitability", ascending=True).head(10)
     top10_sum = simplified.sort_values("suitability_sum_legacy", ascending=False).head(10)
@@ -489,7 +489,7 @@ def write_H1_S4_report(
     high_m_low_t = top_bottom.loc[top_bottom["section"].eq("high_monotonicity_low_trendability_combinations")].head(8)
     missing_features = feature_definition.loc[~feature_definition["found"], "feature_name"].tolist()
 
-    text = f"""# H1_S4 Feature-Segment Suitability Analysis
+    text = f"""# H1_S2 feature_VB_segment_suitability_eda
 
 ## 1. Executive Summary
 
@@ -558,7 +558,7 @@ Zero difference는 monotonicity의 increase/decrease count에 포함하지 않�
 
 {markdown_table(bottom10)}
 
-전체 상세 결과는 `analysis/H1_S4_suitability_results.csv`와 `analysis/H1_S4_feature_segment_summary.csv`에 저장했습니다.
+전체 상세 결과는 `analysis/H1_S2_suitability_results.csv`와 `analysis/H1_S2_feature_segment_summary.csv`에 저장했습니다.
 
 ### Suitability Method Comparison
 
@@ -588,7 +588,7 @@ Zero difference는 monotonicity의 increase/decrease count에 포함하지 않�
 
 ## 8. Case-level and Operating-condition-level Results
 
-Case-level 결과는 각 case 내부 run progression에서 먼저 계산한 뒤 평균했습니다. Pair/domain A/B/C 결과는 `analysis/H1_S4_pair_level_suitability_results.csv`에 저장했습니다. 이 방식은 서로 다른 operating condition의 case를 하나의 artificial time series로 이어붙이는 문제를 피합니다.
+Case-level 결과는 각 case 내부 run progression에서 먼저 계산한 뒤 평균했습니다. Pair/domain A/B/C 결과는 `analysis/H1_S2_pair_level_suitability_results.csv`에 저장했습니다. 이 방식은 서로 다른 operating condition의 case를 하나의 artificial time series로 이어붙이는 문제를 피합니다.
 
 ## 9. Monotonicity vs Trendability Interpretation
 
@@ -615,7 +615,7 @@ Steady segment는 안정 절삭 중 load/energy 변화가 누적 wear trend를 �
 
 ## 12. Paper Formula Fidelity
 
-본 H1_S4 분석에서는 Monotonicity와 Trendability는 논문 원식과 동일하게 계산하였다. 또한 논문 원식에 해당하는 M + T 방식의 `suitability_sum_legacy`도 함께 계산하였다. 다만 primary suitability score는 M과 T의 균형을 강조하기 위해 조화평균으로 정의한 `suitability_harmonic_mean`을 사용하였다. 따라서 본 분석은 논문 원식 결과와 modified score 결과를 모두 제공한다.
+본 H1_S2 분석에서는 Monotonicity와 Trendability는 논문 원식과 동일하게 계산하였다. 또한 논문 원식에 해당하는 M + T 방식의 `suitability_sum_legacy`도 함께 계산하였다. 다만 primary suitability score는 M과 T의 균형을 강조하기 위해 조화평균으로 정의한 `suitability_harmonic_mean`을 사용하였다. 따라서 본 분석은 논문 원식 결과와 modified score 결과를 모두 제공한다.
 
 단, 논문과 달리 현재 분석은 NASA Ames milling의 case/run/sensor/segment 구조에 맞춰 case별 sequence에서 먼저 계산한 뒤 평균하는 실무용 적용입니다.
 
@@ -644,8 +644,8 @@ Steady segment는 안정 절삭 중 load/energy 변화가 누적 wear trend를 �
 - path_schema_version: `{context.get('path_schema_version')}`
 """
     report_path.write_text(text, encoding="utf-8")
-    html = "<!doctype html><html><head><meta charset='utf-8'><title>H1_S4 Report</title></head><body>" + text.replace("\n", "<br>\n") + "</body></html>"
-    (output_dir / "reports" / "H1_S4_report.html").write_text(html, encoding="utf-8")
+    html = "<!doctype html><html><head><meta charset='utf-8'><title>H1_S2 Report</title></head><body>" + text.replace("\n", "<br>\n") + "</body></html>"
+    (output_dir / "reports" / "H1_S2_report.html").write_text(html, encoding="utf-8")
 
 
 def load_dataset(process_info_path: Path, signal_data_path: Path, heuristic_sequence_path: Path) -> pd.DataFrame:
@@ -765,6 +765,8 @@ def segment_vector(segments: dict[str, np.ndarray], segment_setting: str) -> np.
         vector = np.concatenate([segments["entry"], segments["exit"]])
     elif segment_setting == "steady_exit":
         vector = np.concatenate([segments["steady"], segments["exit"]])
+    elif segment_setting == "entry_steady_exit":
+        vector = np.concatenate([segments["entry"], segments["steady"], segments["exit"]])
     else:
         raise ValueError(f"Unknown segment setting: {segment_setting}")
     if len(vector) == 0:
@@ -1007,6 +1009,7 @@ def segment_definition_text(segment: str) -> str:
         "entry_steady": "entry concatenated with steady",
         "entry_exit": "entry concatenated with exit",
         "steady_exit": "steady concatenated with exit",
+        "entry_steady_exit": "entry + steady + exit concatenated; no-load excluded",
     }.get(segment, "")
 
 
@@ -1015,12 +1018,12 @@ def make_dirs(paths: ExperimentPaths) -> None:
 
 
 def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
-    experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_H1_S4_feature_segment_suitability_analysis")
+    experiment_id = datetime.now().strftime("%Y%m%d_%H%M%S_H1_S2_feature_VB_segment_suitability_eda")
     root = Path(args.root).resolve()
     paths = ExperimentPaths(root, experiment_id)
     make_dirs(paths)
-    run_log = paths.execution_dir / "logs" / "H1_S4_run.log"
-    error_log = paths.execution_dir / "logs" / "H1_S4_error.log"
+    run_log = paths.execution_dir / "logs" / "H1_S2_run.log"
+    error_log = paths.execution_dir / "logs" / "H1_S2_error.log"
 
     def log(message: str) -> None:
         with run_log.open("a", encoding="utf-8") as f:
@@ -1037,13 +1040,13 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
         heuristic_sequence_path = root / heuristic_sequence_path
 
     try:
-        log(f"H1_S4 started: {experiment_id}")
+        log(f"H1_S2 started: {experiment_id}")
         config = {
             "experiment": {
                 "experiment_id": experiment_id,
-                "experiment_name": "H1_S4_feature_segment_suitability_analysis_for_NASA_Ames_milling",
+                "experiment_name": "H1_S2_feature_VB_segment_suitability_eda",
             },
-            "experiment_name": "H1_S4_feature_segment_suitability_analysis_for_NASA_Ames_milling",
+            "experiment_name": "H1_S2_feature_VB_segment_suitability_eda",
             "experiment_id": experiment_id,
             "analysis_type": "Exploratory / Feature quality analysis / Degradation-awareness analysis",
             "process_info_path": str(process_info_path),
@@ -1070,8 +1073,8 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
         }
         paths.apply_to_config(config)
         config["config_hash"] = stable_hash(config)
-        write_yaml(paths.execution_dir / "configs" / "H1_S4_input_config.yaml", config)
-        write_yaml(paths.execution_dir / "configs" / "H1_S4_resolved_config.yaml", config)
+        write_yaml(paths.execution_dir / "configs" / "H1_S2_input_config.yaml", config)
+        write_yaml(paths.execution_dir / "configs" / "H1_S2_resolved_config.yaml", config)
 
         data = load_dataset(process_info_path, signal_data_path, heuristic_sequence_path)
         sensors_df = identify_sensors(data)
@@ -1112,7 +1115,7 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
         }
         if not validation["feature_definition_all_found"]:
             validation["ok"] = False
-        write_json(paths.execution_dir / "configs" / "H1_S4_config_validation.json", validation)
+        write_json(paths.execution_dir / "configs" / "H1_S2_config_validation.json", validation)
 
         ordering_summary = {
             "ordering_column": ordering_column,
@@ -1123,7 +1126,7 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
             "rows_by_case": data.groupby("case_id").size().to_dict(),
             "run_range_by_case": data.groupby("case_id")["run"].agg(["min", "max"]).reset_index().to_dict(orient="records"),
         }
-        write_json(paths.execution_dir / "data" / "H1_S4_ordering_summary.json", ordering_summary)
+        write_json(paths.execution_dir / "data" / "H1_S2_ordering_summary.json", ordering_summary)
         dataset_summary = {
             "process_info_path": str(process_info_path),
             "signal_data_path": str(signal_data_path),
@@ -1136,17 +1139,17 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
             "num_case_level_rows": int(len(case_results)),
             "num_case_level_ok": int(case_results["calculation_status"].eq("ok").sum()),
         }
-        write_json(paths.execution_dir / "data" / "H1_S4_dataset_summary.json", dataset_summary)
-        write_csv(paths.execution_dir / "data" / "H1_S4_feature_definition.csv", feature_definition)
-        write_csv(paths.execution_dir / "data" / "H1_S4_segment_definition.csv", segment_definition)
-        write_csv(paths.execution_dir / "data" / "H1_S4_sensor_mapping.csv", sensors_df)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_case_level_suitability_results.csv", case_results)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_suitability_results.csv", overall)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_pair_level_suitability_results.csv", pair_level)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_feature_segment_summary.csv", fs_summary)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_feature_segment_simplified_table.csv", simplified)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_suitability_method_comparison.csv", method_comparison)
-        write_csv(paths.execution_dir / "analysis" / "H1_S4_top_bottom_suitability_summary.csv", top_bottom)
+        write_json(paths.execution_dir / "data" / "H1_S2_dataset_summary.json", dataset_summary)
+        write_csv(paths.execution_dir / "data" / "H1_S2_feature_definition.csv", feature_definition)
+        write_csv(paths.execution_dir / "data" / "H1_S2_segment_definition.csv", segment_definition)
+        write_csv(paths.execution_dir / "data" / "H1_S2_sensor_mapping.csv", sensors_df)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_case_level_suitability_results.csv", case_results)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_suitability_results.csv", overall)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_pair_level_suitability_results.csv", pair_level)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_feature_segment_summary.csv", fs_summary)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_feature_segment_simplified_table.csv", simplified)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_suitability_method_comparison.csv", method_comparison)
+        write_csv(paths.execution_dir / "analysis" / "H1_S2_top_bottom_suitability_summary.csv", top_bottom)
 
         analysis_summary = {
             "top_feature_segment": simplified.sort_values("suitability", ascending=False).head(10).to_dict(orient="records"),
@@ -1158,7 +1161,7 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
             "case_pair_consistency": case_pair_consistency_summary(case_results),
             "status_counts": case_results["calculation_status"].value_counts().to_dict(),
         }
-        write_json(paths.execution_dir / "analysis" / "H1_S4_analysis_summary.json", analysis_summary)
+        write_json(paths.execution_dir / "analysis" / "H1_S2_analysis_summary.json", analysis_summary)
 
         create_suitability_heatmaps(overall, fs_summary, pair_level, method_comparison, paths.execution_dir / "figures")
 
@@ -1171,10 +1174,10 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
             "ordering_column": ordering_column,
             **paths.path_metadata,
         }
-        write_H1_S4_report(paths.execution_dir, context, feature_definition, segment_definition, overall, fs_summary, simplified, pair_level, top_bottom)
-        write_json(paths.execution_dir / "logs" / "H1_S4_environment.json", collect_environment())
+        write_H1_S2_report(paths.execution_dir, context, feature_definition, segment_definition, overall, fs_summary, simplified, pair_level, top_bottom)
+        write_json(paths.execution_dir / "logs" / "H1_S2_environment.json", collect_environment())
         error_log.touch()
-        log(f"H1_S4 finished: {experiment_id}")
+        log(f"H1_S2 finished: {experiment_id}")
         return {"experiment_id": experiment_id, "execution_dir": str(paths.execution_dir), "summary": analysis_summary}
     except Exception as exc:
         error_log.write_text(traceback.format_exc(), encoding="utf-8")
@@ -1183,7 +1186,7 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H1_S4 feature segment suitability analysis.")
+    parser = argparse.ArgumentParser(description="Run H1_S2 feature_VB_segment_suitability_eda.")
     parser.add_argument("--root", default=".")
     parser.add_argument("--process-info-path", default="datasets/processed/mill_process_info_enabled.csv")
     parser.add_argument("--signal-data-path", default="datasets/processed/mill_signal_data_enabled.csv")

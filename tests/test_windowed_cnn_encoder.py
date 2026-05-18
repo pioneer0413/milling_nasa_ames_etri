@@ -42,24 +42,24 @@ def _backward_step(model, args):
 
 def test_windowed_cnn_encoder_forward_shapes():
     encoder = WindowedCNNEncoder(input_channels=6, window_length=300, num_windows=5, latent_dim=32)
-    x = torch.randn(4, 5, 6, 300)
+    x = torch.randn(4, 6, 5, 300)
 
     z, window_latents = encoder(x, return_window_latents=True)
 
-    assert z.shape == (4, 32)
-    assert window_latents.shape == (4, 5, 32)
+    assert z.shape == (4, 300)
+    assert window_latents.shape == (4, 5, 300)
 
 
 def test_cnn_only_regressor_backward_step():
     model = CNNOnlyRegressor.from_config(_config(), input_channels=6)
-    x = torch.randn(4, 5, 6, 300)
+    x = torch.randn(4, 6, 5, 300)
 
     _backward_step(model, (x,))
 
 
 def test_cnn_lag_concat_regressor_backward_step():
     model = CNNLagConcatRegressor.from_config(_config(), input_channels=6)
-    x = torch.randn(4, 3, 5, 6, 300)
+    x = torch.randn(4, 3, 6, 5, 300)
     mask = torch.tensor([[0, 0, 1], [0, 1, 1], [1, 1, 1], [1, 1, 1]], dtype=torch.float32)
 
     _backward_step(model, (x, mask))
@@ -67,7 +67,7 @@ def test_cnn_lag_concat_regressor_backward_step():
 
 def test_cnn_gru_regressor_backward_step():
     model = CNNGRURegressor.from_config(_config(), input_channels=6)
-    x = torch.randn(4, 3, 5, 6, 300)
+    x = torch.randn(4, 3, 6, 5, 300)
     mask = torch.tensor([[0, 0, 1], [0, 1, 1], [1, 1, 1], [1, 1, 1]], dtype=torch.float32)
 
     _backward_step(model, (x, mask))

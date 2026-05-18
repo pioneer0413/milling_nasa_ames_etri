@@ -31,7 +31,16 @@ from milling_experiment_framework.utils.paths import ExperimentPaths
 CASE_SCOPE = [1, 2, 8, 9, 12, 14]
 DOMAIN_CASES = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
 SHIFT_SCENARIOS = [("A", "B"), ("A", "C"), ("B", "A"), ("B", "C"), ("C", "A"), ("C", "B")]
-SEGMENT_SETTINGS = ["full_length", "steady", "entry", "exit", "entry_steady", "entry_exit", "steady_exit"]
+SEGMENT_SETTINGS = [
+    "full_length",
+    "steady",
+    "entry",
+    "exit",
+    "entry_steady",
+    "entry_exit",
+    "steady_exit",
+    "entry_steady_exit",
+]
 FEATURE_NAMES = [
     "mean",
     "std",
@@ -284,6 +293,8 @@ class S1SegmentExecution:
             vector = np.concatenate([segments["entry"], segments["exit"]])
         elif segment_setting == "steady_exit":
             vector = np.concatenate([segments["steady"], segments["exit"]])
+        elif segment_setting == "entry_steady_exit":
+            vector = np.concatenate([segments["entry"], segments["steady"], segments["exit"]])
         else:
             raise ValueError(f"Unknown segment setting: {segment_setting}")
         if len(vector) == 0:

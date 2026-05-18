@@ -1,6 +1,6 @@
 experiment:
   experiment_id: null
-  name: S1_segment_setting_effect_on_VB_prediction
+  name: S2_sensor_combination_effect_on_segment_aware_VB_prediction
   analysis_type: Exploratory
 
 dataset:
@@ -16,6 +16,10 @@ task:
 
 preprocessing:
   output_type: features
+  no_load_excluded: true
+  feature_scaling:
+    enabled: true
+    fit_on: train
   segment_settings:
     - full_length
     - steady
@@ -24,21 +28,7 @@ preprocessing:
     - entry_steady
     - entry_exit
     - steady_exit
-  feature_names:
-    - mean
-    - std
-    - max
-    - min
-    - peak_to_peak
-    - kurtosis
-    - skewness
-    - band_energy
-    - spectral_centroid
-
-split:
-  strategy: fixed_case_pair_domain_shift
-  validation_policy: source_domain_smaller_case
-  leakage_check: true
+    - entry_steady_exit
 
 models:
   - random_forest

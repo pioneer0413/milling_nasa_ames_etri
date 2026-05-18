@@ -39,12 +39,12 @@ preprocessing:
   # To customize, replace null with desired features list, e.g.:
   # smcAC: ["mean", "std", "max", "min"]
   sensor_features:
-    smcAC: null #["std"]
-    smcDC: null #["mean"]
-    vib_spindle: null #["mean"]
-    vib_table: null #["kurtosis"]
-    AE_spindle: null #["mean"]
-    AE_table: null #["band_energy"]
+    smcAC: ["std"]
+    smcDC: ["mean"]
+    vib_spindle: ["mean"]
+    vib_table: ["kurtosis"]
+    AE_spindle: ["mean"]
+    AE_table: ["band_energy"]
 
 domain:
   domain_pairs:
@@ -77,17 +77,17 @@ models:
   feature_ridge:
     enabled: false
   feature_random_forest:
-    enabled: false
+    enabled: true
     n_estimators: 200
     min_samples_leaf: 1
   feature_svr:
-    enabled: false
+    enabled: true
     kernel: rbf
     C: 1.0
     epsilon: 0.1
     gamma: scale
   feature_xgboost:
-    enabled: false
+    enabled: true
     n_estimators: 100
     max_depth: 3
     learning_rate: 0.05
@@ -103,8 +103,6 @@ models:
   cnn_gru:
     enabled: true
   feature_gru:
-    enabled: true
-  hybrid_lstm_process:
     enabled: true
 
 dl_model:
@@ -156,7 +154,7 @@ model_design:
     bidirectional: false
     dropout: 0.0
     head_hidden_dim: 32
-    rnn_type: lstm
+    rnn_type: gru
 
 feature_gru:
   enabled: true
@@ -174,33 +172,12 @@ feature_gru:
     dropout: 0.0
     regression_head_hidden_dim: 32
     output_dim: 1
-    rnn_type: lstm
+    rnn_type: gru
   scaler:
     method: standard_scaler
     fit_scope: source_train_only
   imputer:
     method: median
-    fit_scope: source_train_only
-
-hybrid_lstm_process:
-  enabled: true
-  representation_type: resampled_sensor_lstm_plus_process
-  input_mode: sensor_plus_process
-  use_process_info: true
-  numeric_process_columns: [DOC, feed]
-  categorical_process_columns: [material]
-  lstm:
-    hidden_size: 32
-    num_layers: 1
-    dropout: 0.0
-    bidirectional: false
-    temporal_output_mode: last_hidden
-  regression_head:
-    hidden_dims: [32]
-    dropout: 0.0
-    output_dim: 1
-  scaler:
-    method: median_standard_scaler_and_one_hot
     fit_scope: source_train_only
 
 normalization:

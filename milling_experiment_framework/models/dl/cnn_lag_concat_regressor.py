@@ -18,7 +18,7 @@ class CNNLagConcatRegressor(nn.Module):
     def __init__(
         self,
         encoder: WindowedCNNEncoder,
-        latent_dim: int,
+        run_repr_dim: int,
         sequence_size: int = 3,
         include_mask: bool = True,
         head_hidden_dim: int = 64,
@@ -28,7 +28,7 @@ class CNNLagConcatRegressor(nn.Module):
         self.encoder = encoder
         self.sequence_size = int(sequence_size)
         self.include_mask = bool(include_mask)
-        input_dim = self.sequence_size * int(latent_dim) + (self.sequence_size if self.include_mask else 0)
+        input_dim = self.sequence_size * int(run_repr_dim) + (self.sequence_size if self.include_mask else 0)
         self.head = RegressionHead(input_dim, head_hidden_dim, dropout=dropout)
 
     @classmethod
@@ -40,7 +40,7 @@ class CNNLagConcatRegressor(nn.Module):
         legacy = config.get("dl_model", {})
         return cls(
             encoder=encoder,
-            latent_dim=int(encoder.config.latent_dim),
+            run_repr_dim=int(encoder.output_dim),
             sequence_size=int(model_cfg.get("sequence_size", seq_size)),
             include_mask=bool(model_cfg.get("include_mask", legacy_models.get("include_mask", True))),
             head_hidden_dim=int(model_cfg.get("head_hidden_dim", legacy.get("regressor_hidden_dim", 64))),
@@ -48,10 +48,11 @@ class CNNLagConcatRegressor(nn.Module):
         )
 
     def forward(self, x_seq: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
-        # x_seq: [B, S, K, C, W], mask: [B, S]
+        # x_seq: [B, S, C, K, W] (preferred) or [B, S, K, C, W] (legacy)
+        # mask: [B, S]
         if x_seq.ndim != 5:
             raise ValueError(f"CNNLagConcatRegressor expects [B, S, K, C, W], got {tuple(x_seq.shape)}")
-        b, s, k, c, w = x_seq.shape
+        b, s, d2, d3, w = x_seq.shape
         if s != self.sequence_size:
             raise ValueError(f"Expected sequence_size={self.sequence_size}, got {s}")
         if mask is None:
@@ -59,7 +60,17 @@ class CNNLagConcatRegressor(nn.Module):
         if mask.shape != (b, s):
             raise ValueError(f"Expected mask shape {(b, s)}, got {tuple(mask.shape)}")
 
-        z = self.encoder(x_seq.reshape(b * s, k, c, w)).reshape(b, s, -1)
+        if d2 == self.encoder.input_channels and d3 == self.encoder.num_windows:
+            x_flat = x_seq.reshape(b * s, d2, d3, w)  # [B*S, C, K, W]
+        elif d2 == self.encoder.num_windows and d3 == self.encoder.input_channels:
+            x_flat = x_seq.reshape(b * s, d2, d3, w)  # [B*S, K, C, W]
+        else:
+            raise ValueError(
+                "x_seq must be [B,S,C,K,W] or [B,S,K,C,W] with "
+                f"C={self.encoder.input_channels}, K={self.encoder.num_windows}; got {tuple(x_seq.shape)}"
+            )
+
+        z = self.encoder(x_flat).reshape(b, s, -1)
         z = z * mask.unsqueeze(-1)
         flat = z.reshape(b, -1)
         if self.include_mask:

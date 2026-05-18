@@ -31,7 +31,7 @@ from milling_experiment_framework.experiment_logging.environment import collect_
 from milling_experiment_framework.experiments.execution_path import create_execution_dir
 
 
-PREFIX = "H1_S6"
+PREFIX = "H1_S3"
 CASE_SCOPE = [1, 2, 8, 9, 12, 14]
 PAIR_DEFINITION = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
 PAIR_BY_CASE = {case: pair for pair, cases in PAIR_DEFINITION.items() for case in cases}
@@ -914,11 +914,11 @@ def write_report(output_dir: Path, context: dict[str, Any], assoc_std: pd.DataFr
     ese_combined_rank = joined.groupby("segment_setting")["combined_score"].mean().rank(ascending=False).get("entry_steady_exit", np.nan)
     comp_summary = ese_comp.groupby(["comparison_target", "metric_name"]).agg(mean_delta=("delta", "mean"), improvement_ratio=("improved", "mean")).reset_index()
     acoustic = joined[joined["sensor_group"].eq("Acoustic") & joined["segment_setting"].isin(["entry_exit", "entry_steady_exit"])].sort_values("combined_score", ascending=False).head(10)
-    text = f"""# H1_S6 Association/Suitability Cross-analysis with entry_steady_exit
+    text = f"""# H1_S3 association_suitability_segment_cross_analysis
 
 ## 1. Executive Summary
 
-1. H1_S6 recomputed H1_S1-style association, H1_S4-style suitability, and H1_S5-style cross-analysis with `entry_steady_exit` included.
+1. H1_S3 recomputed H1_S1-style association, H1_S2-style suitability, and H1_S3-style cross-analysis with `entry_steady_exit` included.
 2. `entry_steady_exit` was generated as `entry + steady + exit`, excluding no-load, from raw sensor sequences.
 3. Association/suitability join produced `{len(joined)}` sensor-feature-segment combinations.
 4. Mean-rank positions: entry_steady_exit association rank `{ese_assoc_rank:.2f}`, suitability rank `{ese_suit_rank:.2f}`, combined robust rank `{ese_combined_rank:.2f}` among 8 segments.
@@ -938,7 +938,7 @@ Top robust combinations:
 
 ## 2. Motivation for Re-analysis
 
-Previous H1 analyses used seven no-load-excluded candidate segments and omitted `entry_steady_exit`. H1_S6 adds this cutting-only combined segment to evaluate whether using entry, steady, and exit together improves association, degradation-awareness, or robust combined evidence.
+Previous H1 analyses used seven no-load-excluded candidate segments and omitted `entry_steady_exit`. H1_S3 adds this cutting-only combined segment to evaluate whether using entry, steady, and exit together improves association, degradation-awareness, or robust combined evidence.
 
 ## 3. Data and Scope
 
@@ -961,7 +961,7 @@ Segment mean association:
 
 {assoc_std.groupby('segment_setting')['primary_association_score'].mean().sort_values(ascending=False).to_string()}
 
-## 5. H1_S4-style Suitability Results
+## 5. H1_S2-style Suitability Results
 
 Monotonicity and trendability follow the paper formulas. Primary suitability is harmonic mean; legacy suitability is `M + T`.
 
@@ -1001,7 +1001,7 @@ Acoustic entry_exit / entry_steady_exit candidates:
 
 ## 9. Implications for H2/H3 Modeling
 
-H2/H3 should include `entry_steady_exit` as an explicit candidate segment. Reduced searches should prioritize robust H1_S6 candidates and compare `entry_steady_exit` against `entry_exit`, `steady_exit`, and `full_length` under domain shift.
+H2/H3 should include `entry_steady_exit` as an explicit candidate segment. Reduced searches should prioritize robust H1_S3 candidates and compare `entry_steady_exit` against `entry_exit`, `steady_exit`, and `full_length` under domain shift.
 
 ## 10. Limitations
 
@@ -1018,7 +1018,7 @@ Association and suitability are EDA diagnostics and do not guarantee prediction 
 
 - experiment_id: `{context['experiment_id']}`
 - hypothesis_id: `H1`
-- scenario_id: `S6`
+- scenario_id: `S3`
 - execution_dir: `{output_dir}`
 - path_schema_version: `hierarchical_v1`
 - skipped: `{skipped}`
@@ -1026,15 +1026,15 @@ Association and suitability are EDA diagnostics and do not guarantee prediction 
     report = output_dir / "reports" / f"{PREFIX}_report.md"
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(text, encoding="utf-8")
-    html_text = "<!doctype html><html><head><meta charset='utf-8'><title>H1_S6 Report</title></head><body>" + html.escape(text).replace("\n", "<br>\n") + "</body></html>"
+    html_text = "<!doctype html><html><head><meta charset='utf-8'><title>H1_S3 Report</title></head><body>" + html.escape(text).replace("\n", "<br>\n") + "</body></html>"
     (output_dir / "reports" / f"{PREFIX}_report.html").write_text(html_text, encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     root = Path(args.root).resolve()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    experiment_id = f"{timestamp}_H1_S6_association_suitability_cross_analysis_with_entry_steady_exit"
-    path_config = {"experiment": {"experiment_id": experiment_id, "timestamp": timestamp, "hypothesis_id": "H1", "scenario_id": "S6", "experiment_topic": "association_suitability_cross_analysis_with_entry_steady_exit"}}
+    experiment_id = f"{timestamp}_H1_S3_association_suitability_segment_cross_analysis"
+    path_config = {"experiment": {"experiment_id": experiment_id, "timestamp": timestamp, "hypothesis_id": "H1", "scenario_id": "S3", "experiment_topic": "association_suitability_segment_cross_analysis"}}
     output_dir = Path(create_execution_dir(path_config, root=root / "experiments" / "executions"))
     for d in ["configs", "data", "analysis", "figures", "reports", "logs"]:
         (output_dir / d).mkdir(parents=True, exist_ok=True)
@@ -1049,7 +1049,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             f.write(line + "\n")
 
     try:
-        log(f"H1_S6 started: {experiment_id}")
+        log(f"H1_S3 started: {experiment_id}")
         process_info_path = root / args.process_info_path
         signal_data_path = root / args.signal_data_path
         heuristic_sequence_path = root / args.heuristic_sequence_path
@@ -1086,7 +1086,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "suitability_sum_in_range": bool(overall_suit["suitability_sum_legacy"].between(0, 2).all()),
         }
         if not validation["ok"]:
-            raise ValueError(f"H1_S6 validation failed: {validation}")
+            raise ValueError(f"H1_S3 validation failed: {validation}")
 
         # Data/config outputs
         write_json(output_dir / "data" / f"{PREFIX}_dataset_summary.json", {"rows": len(data), "cases": sorted(data["case_id"].unique().tolist()), "sensors": sensors})
@@ -1151,7 +1151,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         }
         write_json(output_dir / "analysis" / f"{PREFIX}_analysis_summary.json", summary)
         write_json(output_dir / "logs" / f"{PREFIX}_environment.json", collect_environment(str(root)))
-        log(f"H1_S6 finished: {experiment_id}")
+        log(f"H1_S3 finished: {experiment_id}")
         return summary
     except Exception:
         error_log.write_text(traceback.format_exc(), encoding="utf-8")
@@ -1159,7 +1159,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run H1_S6 association/suitability analysis with entry_steady_exit.")
+    parser = argparse.ArgumentParser(description="Run H1_S3 association_suitability_segment_cross_analysis.")
     parser.add_argument("--root", default=".")
     parser.add_argument("--process-info-path", default="datasets/processed/mill_process_info_enabled.csv")
     parser.add_argument("--signal-data-path", default="datasets/processed/mill_signal_data_enabled.csv")
