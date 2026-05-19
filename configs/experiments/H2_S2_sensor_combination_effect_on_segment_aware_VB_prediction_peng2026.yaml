@@ -1,0 +1,55 @@
+experiment:
+  experiment_id: null
+  name: S2_sensor_combination_effect_on_segment_aware_VB_prediction_peng2026
+  analysis_type: Exploratory
+
+dataset:
+  name: mill_processed_enabled
+  process_info_path: datasets/processed/mill_process_info_enabled.csv
+  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  heuristic_sequence_path: datasets/metadata/heuristic_sequence_peng2026.csv
+  dataset_version: enabled_cases_with_peng2026_heuristic_segments_v1
+
+task:
+  type: regression
+  target_column: VB
+
+preprocessing:
+  output_type: features
+  no_load_excluded: true
+  feature_scaling:
+    enabled: true
+    fit_on: train
+  segment_settings:
+    - full_length
+    - steady
+    - entry
+    - exit
+    - entry_steady
+    - entry_exit
+    - steady_exit
+    - entry_steady_exit
+
+models:
+  - random_forest
+  - mlp
+
+model_defaults:
+  random_forest:
+    n_jobs: -1
+  mlp:
+    hidden_layer_sizes: [64, 32, 16]
+    max_iter: 300
+    learning_rate_init: 0.001
+
+seeds:
+  initial_seeds: [0, 1, 2]
+  extra_seeds: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  seed_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
+evaluation:
+  metrics: [mae, rmse, r2, pearson, spearman]
+
+report:
+  enabled: true
+  formats: [md, html]

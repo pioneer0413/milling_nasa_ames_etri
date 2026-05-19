@@ -532,6 +532,35 @@ def split_source_validation(meta: pd.DataFrame, source_cases: list[int], target_
     return split
 
 
+def split_train_test_only(meta: pd.DataFrame, source_cases: list[int], target_cases: list[int]) -> pd.DataFrame:
+    split = meta.copy()
+    split["split"] = "excluded"
+    split.loc[split["case_id"].isin(source_cases), "split"] = "train"
+    split.loc[split["case_id"].isin(target_cases), "split"] = "test"
+    return split
+
+
+def domain_cases_from_config(config: dict[str, Any]) -> dict[str, list[int]]:
+    configured = config.get("domain", {}).get("domain_pairs", DOMAIN_CASES)
+    return {str(domain): [int(case_id) for case_id in cases] for domain, cases in configured.items()}
+
+
+def transfer_scenarios_from_config(config: dict[str, Any]) -> list[tuple[str, str]]:
+    configured = config.get("domain", {}).get("transfer_scenarios")
+    if not configured:
+        return TRANSFER_SCENARIOS
+    return [(str(source), str(target)) for source, target in configured]
+
+
+def make_split(meta: pd.DataFrame, source_cases: list[int], target_cases: list[int], config: dict[str, Any]) -> pd.DataFrame:
+    split_cfg = config.get("split", {})
+    strategy = str(split_cfg.get("validation_strategy", "source_case_chronological_tail")).lower()
+    val_ratio = float(split_cfg.get("validation_ratio", 0.2))
+    if strategy in {"none", "no_validation", "train_test_only", "leave_one_pair_out", "leave_one_case_out"} or val_ratio <= 0:
+        return split_train_test_only(meta, source_cases, target_cases)
+    return split_source_validation(meta, source_cases, target_cases, val_ratio)
+
+
 def build_sequences_for_indices(
     data: RunData,
     indices: np.ndarray,
@@ -907,7 +936,7 @@ def evaluate_dl_loss(model: nn.Module, loader: DataLoader, model_name: str, devi
 def train_dl_model(
     model_name: str,
     train_loader: DataLoader,
-    val_loader: DataLoader,
+    val_loader: DataLoader | None,
     config: dict[str, Any],
     device: torch.device,
     y_mean: float,
@@ -927,6 +956,7 @@ def train_dl_model(
     optimizer = torch.optim.Adam(model.parameters(), lr=float(config["training"].get("learning_rate", 1e-3)))
     loss_fn = nn.MSELoss()
     patience = int(config["training"].get("early_stopping", {}).get("patience", 5))
+    early_stopping_enabled = bool(config["training"].get("early_stopping", {}).get("enabled", True))
     epochs = int(max_epochs or config["training"].get("max_epochs", 25))
     best_rmse = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
@@ -959,13 +989,25 @@ def train_dl_model(
             train_loss_total += float(loss.detach().cpu()) * count
             train_count += count
         train_loss = train_loss_total / max(train_count, 1)
-        val_loss = evaluate_dl_loss(model, val_loader, model_name, device, loss_fn)
         train_metrics, _, _ = evaluate_dl(model, train_loader, model_name, device, y_mean, y_std)
-        val_metrics, _, _ = evaluate_dl(model, val_loader, model_name, device, y_mean, y_std)
-        is_best_epoch = bool(val_metrics["RMSE"] < best_rmse)
-        if val_metrics["RMSE"] < best_rmse:
-            best_rmse = val_metrics["RMSE"]
-            best_metrics = val_metrics
+        if val_loader is not None:
+            val_loss = evaluate_dl_loss(model, val_loader, model_name, device, loss_fn)
+            val_metrics, _, _ = evaluate_dl(model, val_loader, model_name, device, y_mean, y_std)
+            monitor_rmse = val_metrics["RMSE"]
+        else:
+            val_loss = float("nan")
+            val_metrics = {"MAE": float("nan"), "RMSE": float("nan"), "R2": float("nan")}
+            monitor_rmse = train_metrics["RMSE"]
+        is_best_epoch = bool(monitor_rmse < best_rmse) if val_loader is not None else False
+        if val_loader is None:
+            best_rmse = monitor_rmse
+            best_metrics = train_metrics
+            best_epoch = _epoch
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            bad_epochs = 0
+        elif monitor_rmse < best_rmse:
+            best_rmse = monitor_rmse
+            best_metrics = val_metrics if val_loader is not None else train_metrics
             best_epoch = _epoch
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             bad_epochs = 0
@@ -993,7 +1035,7 @@ def train_dl_model(
                 "is_best_epoch": is_best_epoch,
             }
         )
-        if bad_epochs >= patience:
+        if early_stopping_enabled and val_loader is not None and bad_epochs >= patience:
             break
     elapsed = time.time() - start
     for row in history_rows:
@@ -1021,7 +1063,7 @@ def train_dl_model(
         {
             **checkpoint_common,
             "epoch": last_epoch,
-            "best_val_RMSE": best_metrics["RMSE"],
+            "best_val_RMSE": best_metrics["RMSE"] if val_loader is not None else float("nan"),
             "state_dict": model.state_dict(),
             "model_state_dict": model.state_dict(),
         },
@@ -1033,7 +1075,7 @@ def train_dl_model(
         {
             **checkpoint_common,
             "epoch": int(best_epoch),
-            "best_val_RMSE": best_metrics["RMSE"],
+            "best_val_RMSE": best_metrics["RMSE"] if val_loader is not None else float("nan"),
             "state_dict": model.state_dict(),
             "model_state_dict": model.state_dict(),
             "best_metrics": best_metrics,
@@ -1047,13 +1089,18 @@ def train_dl_model(
         "model_name": model_name,
         "scenario_name": scenario_name,
         "seed": seed,
+        "validation_enabled": bool(val_loader is not None),
+        "epoch_selection": "validation_RMSE" if val_loader is not None else "final_epoch",
         "best_epoch": int(best_epoch),
-        "best_val_RMSE": best_metrics["RMSE"],
-        "best_val_MAE": best_metrics["MAE"],
-        "best_val_R2": best_metrics["R2"],
+        "best_val_RMSE": best_metrics["RMSE"] if val_loader is not None else float("nan"),
+        "best_val_MAE": best_metrics["MAE"] if val_loader is not None else float("nan"),
+        "best_val_R2": best_metrics["R2"] if val_loader is not None else float("nan"),
+        "best_train_RMSE": best_metrics["RMSE"] if val_loader is None else float("nan"),
+        "best_train_MAE": best_metrics["MAE"] if val_loader is None else float("nan"),
+        "best_train_R2": best_metrics["R2"] if val_loader is None else float("nan"),
         "final_epoch": final_epoch,
         "stopped_by_early_stopping": bool(final_epoch < epochs),
-        "interpretation": "best epoch selected by validation RMSE",
+        "interpretation": "best epoch selected by validation RMSE" if val_loader is not None else "final epoch selected; validation disabled",
     }
     return model, best_metrics, elapsed, pd.DataFrame(history_rows), best_summary
 
@@ -1148,10 +1195,11 @@ def run_scenario_seed(
     smoke: bool = False,
 ) -> dict[str, Any]:
     set_seed(seed)
-    source_cases = DOMAIN_CASES[source]
-    target_cases = DOMAIN_CASES[target]
+    domain_cases = domain_cases_from_config(config)
+    source_cases = domain_cases[source]
+    target_cases = domain_cases[target]
     scenario_name = f"{source}_to_{target}"
-    split = split_source_validation(data.meta, source_cases, target_cases, float(config["split"].get("validation_ratio", 0.2)))
+    split = make_split(data.meta, source_cases, target_cases, config)
     train_idx = split.index[split["split"] == "train"].to_numpy()
     val_idx = split.index[split["split"] == "validation"].to_numpy()
     test_idx = split.index[split["split"] == "test"].to_numpy()
@@ -1164,19 +1212,19 @@ def run_scenario_seed(
     
     target_col = config["data"].get("target_col", "VB")
     y_train = split.loc[train_idx, target_col].to_numpy(dtype=np.float32)
-    y_val = split.loc[val_idx, target_col].to_numpy(dtype=np.float32)
+    y_val = split.loc[val_idx, target_col].to_numpy(dtype=np.float32) if len(val_idx) else np.asarray([], dtype=np.float32)
     y_test = split.loc[test_idx, target_col].to_numpy(dtype=np.float32)
     y_mean = float(np.mean(y_train))
     y_std = float(np.std(y_train) if np.std(y_train) > 1e-8 else 1.0)
     y_train_s = (y_train - y_mean) / y_std
-    y_val_s = (y_val - y_mean) / y_std
+    y_val_s = (y_val - y_mean) / y_std if len(y_val) else np.asarray([], dtype=np.float32)
     y_test_s = (y_test - y_mean) / y_std
 
     seq_mean, seq_std = fit_sequence_scaler(data.sequences, train_idx)
     seq_norm = normalize_sequences(data.sequences, seq_mean, seq_std)
     seq_size = int(config["sequence"].get("sequence_size", 3))
     x_train_seq, m_train = build_sequences_for_indices(data, train_idx, seq_norm, seq_size)
-    x_val_seq, m_val = build_sequences_for_indices(data, val_idx, seq_norm, seq_size)
+    x_val_seq, m_val = build_sequences_for_indices(data, val_idx, seq_norm, seq_size) if len(val_idx) else (None, None)
     x_test_seq, m_test = build_sequences_for_indices(data, test_idx, seq_norm, seq_size)
 
     feature_cfg = config.get("feature_gru", {})
@@ -1199,7 +1247,7 @@ def run_scenario_seed(
         allow_cross_case_sequence=bool(config["sequence"].get("allow_cross_case_sequence", False)),
     )
     feature_train = feature_builder.build_sequences(feature_norm, data.meta, train_idx)
-    feature_val = feature_builder.build_sequences(feature_norm, data.meta, val_idx)
+    feature_val = feature_builder.build_sequences(feature_norm, data.meta, val_idx) if len(val_idx) else None
     feature_test = feature_builder.build_sequences(feature_norm, data.meta, test_idx)
 
     hybrid_sensor_mean, hybrid_sensor_std = fit_hybrid_sensor_scaler(data.sensor_run_sequences, train_idx)
@@ -1223,8 +1271,8 @@ def run_scenario_seed(
                     model_name,
                     data.feature_matrix[train_idx],
                     y_train,
-                    data.feature_matrix[val_idx],
-                    y_val,
+                    data.feature_matrix[val_idx] if len(val_idx) else data.feature_matrix[train_idx],
+                    y_val if len(val_idx) else y_train,
                     data.feature_matrix[test_idx],
                     seed,
                     config,
@@ -1245,22 +1293,22 @@ def run_scenario_seed(
         else:
             if model_name in {"cnn_only", "cnn1d_only"}:
                 train_ds = CurrentRunDataset(seq_norm[train_idx], y_train_s)
-                val_ds = CurrentRunDataset(seq_norm[val_idx], y_val_s)
+                val_ds = CurrentRunDataset(seq_norm[val_idx], y_val_s) if len(val_idx) else None
                 test_ds = CurrentRunDataset(seq_norm[test_idx], y_test_s)
             elif model_name == "feature_gru":
                 train_ds = RunSequenceDataset(feature_train.x_seq, feature_train.mask, y_train_s)
-                val_ds = RunSequenceDataset(feature_val.x_seq, feature_val.mask, y_val_s)
+                val_ds = RunSequenceDataset(feature_val.x_seq, feature_val.mask, y_val_s) if feature_val is not None else None
                 test_ds = RunSequenceDataset(feature_test.x_seq, feature_test.mask, y_test_s)
             elif model_name == HYBRID_PROCESS_MODEL:
                 train_ds = HybridProcessDataset(hybrid_sensor_norm[train_idx], hybrid_process_features[train_idx], y_train_s)
-                val_ds = HybridProcessDataset(hybrid_sensor_norm[val_idx], hybrid_process_features[val_idx], y_val_s)
+                val_ds = HybridProcessDataset(hybrid_sensor_norm[val_idx], hybrid_process_features[val_idx], y_val_s) if len(val_idx) else None
                 test_ds = HybridProcessDataset(hybrid_sensor_norm[test_idx], hybrid_process_features[test_idx], y_test_s)
             else:
                 train_ds = RunSequenceDataset(x_train_seq, m_train, y_train_s)
-                val_ds = RunSequenceDataset(x_val_seq, m_val, y_val_s)
+                val_ds = RunSequenceDataset(x_val_seq, m_val, y_val_s) if x_val_seq is not None and m_val is not None else None
                 test_ds = RunSequenceDataset(x_test_seq, m_test, y_test_s)
             train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True)
-            val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False)
+            val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False) if val_ds is not None else None
             test_loader = DataLoader(test_ds, batch_size=bs, shuffle=False)
             checkpoint_base = output_dir / ("smoke" if smoke else "checkpoints") / model_name
             stem = f"{scenario_name}_seed_{seed}"
@@ -1547,7 +1595,8 @@ def build_default_config() -> dict[str, Any]:
 
 
 def validate_config_and_data(config: dict[str, Any], data: RunData, output_dir: Path) -> dict[str, Any]:
-    scenarios = [f"{s}_to_{t}" for s, t in TRANSFER_SCENARIOS]
+    scenario_pairs = transfer_scenarios_from_config(config)
+    scenarios = [f"{s}_to_{t}" for s, t in scenario_pairs]
     checks = {
         "data_files_exist": Path(config["data"]["process_info_path"]).exists() and Path(config["data"]["signal_data_path"]).exists(),
         "target_column": config["data"]["target_col"],
@@ -1575,7 +1624,7 @@ def validate_config_and_data(config: dict[str, Any], data: RunData, output_dir: 
         "feature_gru_imputer_fit_scope": config.get("feature_gru", {}).get("imputer", {}).get("fit_scope", "source_train_only"),
         "feature_gru_sequence_cross_case_allowed": bool(config.get("sequence", {}).get("allow_cross_case_sequence", False)),
         "scenarios": scenarios,
-        "all_scenarios_have_train_val_test": True,
+        "all_scenarios_have_required_splits": True,
         "source_only_validation": True,
         "train_only_scaler_policy": True,
         "left_padding_policy": config["sequence"]["padding"] == "left",
@@ -1588,17 +1637,22 @@ def validate_config_and_data(config: dict[str, Any], data: RunData, output_dir: 
         "visualization_filter_exclude_from_metrics": bool(config.get("visualization", {}).get("exclude_filtered_from_metrics", False)),
     }
     split_summaries = []
-    for source, target in TRANSFER_SCENARIOS:
-        split = split_source_validation(data.meta, DOMAIN_CASES[source], DOMAIN_CASES[target], float(config["split"]["validation_ratio"]))
+    domain_cases = domain_cases_from_config(config)
+    split_cfg = config.get("split", {})
+    strategy = str(split_cfg.get("validation_strategy", "source_case_chronological_tail")).lower()
+    validation_required = strategy not in {"none", "no_validation", "train_test_only", "leave_one_pair_out", "leave_one_case_out"} and float(split_cfg.get("validation_ratio", 0.2)) > 0
+    for source, target in scenario_pairs:
+        split = make_split(data.meta, domain_cases[source], domain_cases[target], config)
         counts = split["split"].value_counts().to_dict()
         train_cases = set(split.loc[split["split"] == "train", "case_id"].astype(int))
         val_cases = set(split.loc[split["split"] == "validation", "case_id"].astype(int))
         test_cases = set(split.loc[split["split"] == "test", "case_id"].astype(int))
-        ok = bool(train_cases <= set(DOMAIN_CASES[source]) and val_cases <= set(DOMAIN_CASES[source]) and test_cases <= set(DOMAIN_CASES[target]))
-        checks["all_scenarios_have_train_val_test"] = checks["all_scenarios_have_train_val_test"] and all(counts.get(k, 0) > 0 for k in ["train", "validation", "test"]) and ok
+        ok = bool(train_cases <= set(domain_cases[source]) and val_cases <= set(domain_cases[source]) and test_cases <= set(domain_cases[target]))
+        required_splits = ["train", "test"] + (["validation"] if validation_required else [])
+        checks["all_scenarios_have_required_splits"] = checks["all_scenarios_have_required_splits"] and all(counts.get(k, 0) > 0 for k in required_splits) and ok
         split_summaries.append({"scenario": f"{source}_to_{target}", "counts": counts, "train_cases": sorted(train_cases), "val_cases": sorted(val_cases), "test_cases": sorted(test_cases), "source_target_separation_ok": ok})
     checks["split_summaries"] = split_summaries
-    checks["passed"] = all([checks["data_files_exist"], checks["target_column_exists"], checks["case_column_exists"], checks["run_id_column_exists"], checks["run_order_column_exists"], checks["sensor_mapping_ok"], checks["all_scenarios_have_train_val_test"], checks["windowing_policy_ok"], not checks["allow_cross_case_sequence"]])
+    checks["passed"] = all([checks["data_files_exist"], checks["target_column_exists"], checks["case_column_exists"], checks["run_id_column_exists"], checks["run_order_column_exists"], checks["sensor_mapping_ok"], checks["all_scenarios_have_required_splits"], checks["windowing_policy_ok"], not checks["allow_cross_case_sequence"]])
     write_json(output_dir / "configs" / f"{PREFIX}_config_validation.json", checks)
     return checks
 
@@ -1635,7 +1689,7 @@ def leakage_check(split_df: pd.DataFrame, config: dict[str, Any]) -> dict[str, A
         "target_domain_feature_sequence_used_for_training_or_validation": False,
         "run_order_preserved": True,
         "early_runs_left_padded": config["sequence"].get("padding") == "left",
-        "validation_split_scope": "source_domain_only",
+        "validation_split_scope": "source_domain_only" if split_df["split"].eq("validation").any() else "disabled",
     }
 
 
@@ -1804,11 +1858,12 @@ def run_numeric_debug_diagnostics(data: RunData, config: dict[str, Any], output_
     warning_rows: list[dict[str, Any]] = []
     sequence_size = int(config["sequence"].get("sequence_size", 3))
     drop_first_enabled = bool(config.get("preprocessing", {}).get("drop_first_run", {}).get("enabled", False))
-    for source, target in TRANSFER_SCENARIOS:
-        source_cases = DOMAIN_CASES[source]
-        target_cases = DOMAIN_CASES[target]
+    domain_cases = domain_cases_from_config(config)
+    for source, target in transfer_scenarios_from_config(config):
+        source_cases = domain_cases[source]
+        target_cases = domain_cases[target]
         scenario_name = f"{source}_to_{target}"
-        split = split_source_validation(data.meta, source_cases, target_cases, float(config["split"].get("validation_ratio", 0.2)))
+        split = make_split(data.meta, source_cases, target_cases, config)
         train_idx = split.index[split["split"] == "train"].to_numpy()
         if drop_first_enabled:
             train_idx = drop_first_runs(split, train_idx)
@@ -2171,13 +2226,17 @@ def make_filtered_prediction_figures(output_dir: Path, predictions: pd.DataFrame
         model_colors = dict(zip(model_names, plt.cm.tab10(np.linspace(0, 1, max(len(model_names), 1)))))
         source_styles = {"A": "-", "B": "--", "C": ":"}
 
-        fig, axes = plt.subplots(nrows, ncols, figsize=(13, 3.8 * nrows), squeeze=False)
-        for ax, case_id in zip(axes.ravel(), cases):
-            tr = true_ref.loc[true_ref["case_id"] == case_id].sort_values("run_order")
+        def get_case_target_label(case_id: int) -> str:
             target_domains = sorted(source_avg.loc[source_avg["case_id"] == case_id, "target_domain"].dropna().unique())
-            target_label = "/".join(str(x) for x in target_domains) if target_domains else "unknown"
+            return "/".join(str(x) for x in target_domains) if target_domains else "unknown"
+
+        def plot_source_condition_case(ax: plt.Axes, case_id: int, source_domains: list[str] | None = None, title_suffix: str = "") -> None:
+            tr = true_ref.loc[true_ref["case_id"] == case_id].sort_values("run_order")
+            target_label = get_case_target_label(case_id)
             ax.plot(tr["run_order"], tr["y_true"], color="black", linewidth=2, label="y_true")
             case_source_avg = source_avg.loc[source_avg["case_id"] == case_id]
+            if source_domains is not None:
+                case_source_avg = case_source_avg.loc[case_source_avg["source_domain"].astype(str).isin(source_domains)]
             for (model_name, source_domain), g in case_source_avg.groupby(["model_name", "source_domain"]):
                 g = g.sort_values("run_order")
                 ax.plot(
@@ -2190,16 +2249,51 @@ def make_filtered_prediction_figures(output_dir: Path, predictions: pd.DataFrame
                     linewidth=1.3,
                     label=f"{model_name} trained on {source_domain}",
                 )
-            ax.set_title(f"Case {case_id} (target {target_label})")
+            ax.set_title(f"Case {case_id} (target {target_label}){title_suffix}")
             ax.set_xlabel("run_order")
             ax.set_ylabel("VB")
+
+        def collect_legend_entries(plot_axes: np.ndarray) -> dict[str, object]:
+            legend_entries = {}
+            for ax in plot_axes.ravel():
+                handles, labels = ax.get_legend_handles_labels()
+                for handle, label in zip(handles, labels):
+                    legend_entries.setdefault(label, handle)
+            return legend_entries
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=(13, 3.8 * nrows), squeeze=False)
+        for ax, case_id in zip(axes.ravel(), cases):
+            plot_source_condition_case(ax, case_id)
         for ax in axes.ravel()[len(cases) :]:
             ax.axis("off")
-        handles, labels = axes[0, 0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc="upper center", ncol=3, fontsize=6)
+        legend_entries = collect_legend_entries(axes)
+        fig.legend(list(legend_entries.values()), list(legend_entries.keys()), loc="upper center", ncol=3, fontsize=6)
         fig.tight_layout(rect=[0, 0, 1, 0.9])
         fig.savefig(fig_dir / f"{PREFIX}_case_wise_source_condition_prediction_comparison.png", dpi=180)
         plt.close(fig)
+
+        for case_a, case_b in [(1, 9), (2, 12), (8, 14)]:
+            if case_a not in cases or case_b not in cases:
+                continue
+            target_label = get_case_target_label(case_a)
+            comparison_sources = [domain for domain in ["A", "B", "C"] if domain != target_label]
+            if len(comparison_sources) < 2:
+                comparison_sources = sorted(source_avg.loc[source_avg["case_id"].isin([case_a, case_b]), "source_domain"].astype(str).unique())[:2]
+
+            fig, axes = plt.subplots(3, 2, figsize=(13, 9.2), squeeze=False, sharex="col", sharey="col")
+            row_specs = [
+                (comparison_sources, f" ({' and '.join(comparison_sources)} trained)"),
+                ([comparison_sources[0]], f" ({comparison_sources[0]} trained)"),
+                ([comparison_sources[1]], f" ({comparison_sources[1]} trained)"),
+            ]
+            for row_idx, (source_domains, title_suffix) in enumerate(row_specs):
+                for col_idx, case_id in enumerate([case_a, case_b]):
+                    plot_source_condition_case(axes[row_idx, col_idx], case_id, source_domains=source_domains, title_suffix=title_suffix)
+            legend_entries = collect_legend_entries(axes)
+            fig.legend(list(legend_entries.values()), list(legend_entries.keys()), loc="upper center", ncol=3, fontsize=6)
+            fig.tight_layout(rect=[0, 0, 1, 0.92])
+            fig.savefig(fig_dir / f"{PREFIX}_case_wise_source_condition_prediction_comparison-case_{case_a}_{case_b}.png", dpi=180)
+            plt.close(fig)
 
     models = sorted(filtered["model_name"].unique())
     ncols = 3
@@ -2277,6 +2371,26 @@ def write_report(
     feature_best = model_comparison.loc[model_comparison["model_name"].isin(FEATURE_MODELS)].sort_values("mean_RMSE_over_6_shifts").head(1)
     feature_best_name = feature_best["model_name"].iloc[0] if not feature_best.empty else "none"
     feature_best_rmse = feature_best["mean_RMSE_over_6_shifts"].iloc[0] if not feature_best.empty else float("nan")
+    scenario_pairs = transfer_scenarios_from_config(config)
+    split_cfg = config.get("split", {})
+    validation_enabled = str(split_cfg.get("validation_strategy", "")).lower() not in {"none", "no_validation", "train_test_only", "leave_one_pair_out", "leave_one_case_out"} and float(split_cfg.get("validation_ratio", 0.0)) > 0
+    scenario_text = ", ".join([f"{s}_to_{t}" for s, t in scenario_pairs])
+    validation_text = (
+        f"chronological tail split inside source cases only, ratio={split_cfg.get('validation_ratio')}"
+        if validation_enabled
+        else "disabled; all source cases are used for training and the configured held-out target cases are used only for test"
+    )
+    early_cfg = config["training"].get("early_stopping", {})
+    training_text = (
+        f"max_epochs={config['training']['max_epochs']} with early stopping patience={early_cfg.get('patience')}"
+        if early_cfg.get("enabled", True)
+        else f"fixed max_epochs={config['training']['max_epochs']} with early stopping disabled"
+    )
+    epoch_selection_text = (
+        f"The best epoch is selected by validation RMSE using source-domain validation only. Train/validation curves are saved as `figures/{PREFIX}_learning_history_loss_curve.png` and `figures/{PREFIX}_learning_history_val_rmse_curve.png`."
+        if validation_enabled
+        else f"Validation is disabled, so the final epoch is selected for DL checkpoints. Training history is saved in `metrics/{PREFIX}_learning_history.csv`; validation columns are NaN."
+    )
     report_comp = model_comparison.copy()
     report_metadata_md = "No model comparison metadata available."
     if not report_comp.empty:
@@ -2304,10 +2418,10 @@ def write_report(
 - Experiment ID: `{config['experiment']['experiment_id']}`
 - Execution dir: `{config['experiment']['execution_dir']}`
 - Best model by target-domain RMSE: `{best.get('model_name')}` with mean RMSE `{best.get('mean_RMSE_over_6_shifts')}`.
-- Domain generalization protocol used A={{1,9}}, B={{2,12}}, C={{8,14}} and all 6 source->target shifts.
+- Domain generalization protocol used configured domain pairs {config.get('domain', {}).get('domain_pairs', DOMAIN_CASES)} and scenarios {scenario_text}.
 - Run sequence models used sequence_size={config['sequence']['sequence_size']} with left padding and no cross-case sequence construction.
 - Initial run used seeds {config['experiment']['seed_list']} and models {ALL_MODELS}.
-- DL training used max_epochs={config['training']['max_epochs']} and patience={config['training']['early_stopping']['patience']} for all deep learning models.
+- DL training used {training_text} for all deep learning models.
 - Feature-based models were expanded to Ridge, Random Forest, SVR, and XGBoost when available.
 - Visualization-only RMSE filter excluded {excluded_count} case/model/seed conditions from prediction plots; metrics and rankings still include every condition.
 
@@ -2317,8 +2431,8 @@ def write_report(
 - Target: `{config['data']['target_col']}`
 - Sensors: {', '.join(config['data']['sensor_columns'])}
 - Cases: {config['data']['selected_cases']}
-- Transfer scenarios: {', '.join([f'{s}_to_{t}' for s, t in TRANSFER_SCENARIOS])}
-- Validation: chronological tail split inside source cases only, ratio={config['split']['validation_ratio']}.
+- Transfer scenarios: {scenario_text}
+- Validation: {validation_text}.
 - DL input: each full run is split into {config.get('model_design', {}).get('run_encoder', {}).get('num_windows', 5)} overlapped temporal windows of length {config.get('model_design', {}).get('run_encoder', {}).get('window_length', 3000)}; one shared CNN encodes each window and max pooling creates one run-level latent.
 - Feature baseline input: current run is resampled to length {config['sequence']['sequence_length']} before handcrafted feature extraction.
 - Run sequence: GRU/lag inputs use `[z_(t-2), z_(t-1), z_t]`, where each `z` is a windowed-CNN run-level latent.
@@ -2375,7 +2489,7 @@ Learning history is saved in `metrics/{PREFIX}_learning_history.csv`; best epoch
 
 {best_epoch_md}
 
-The best epoch is selected by validation RMSE using source-domain validation only. Train/validation curves are saved as `figures/{PREFIX}_learning_history_loss_curve.png` and `figures/{PREFIX}_learning_history_val_rmse_curve.png`.
+{epoch_selection_text}
 
 ## 6.4 Prediction Pattern over Run Order
 
@@ -2530,8 +2644,9 @@ def main() -> None:
     skipped_frames: list[pd.DataFrame] = []
     scaler_records: list[dict[str, Any]] = []
     models = [m for m in ALL_MODELS if model_enabled(config, m)]
+    scenarios = transfer_scenarios_from_config(config)
     for seed in config["experiment"]["seed_list"]:
-        for source, target in TRANSFER_SCENARIOS:
+        for source, target in scenarios:
             result = run_scenario_seed(data, config, source, target, int(seed), output_dir, models=models)
             case_frames.append(result["case_metrics"])
             domain_frames.append(result["domain_metrics"])
@@ -2585,7 +2700,7 @@ def main() -> None:
     predictions.to_csv(output_dir / "predictions" / f"{PREFIX}_prediction_errors.csv", index=False)
     splits.to_csv(output_dir / "splits" / f"{PREFIX}_split.csv", index=False)
     split_summary = {
-        "scenarios": [f"{s}_to_{t}" for s, t in TRANSFER_SCENARIOS],
+        "scenarios": [f"{s}_to_{t}" for s, t in scenarios],
         "seeds": config["experiment"]["seed_list"],
         "split_counts": splits.groupby(["scenario_name", "seed", "split"]).size().reset_index(name="count").to_dict("records"),
         "scaler_fit_records": scaler_records,
