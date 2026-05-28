@@ -13,24 +13,41 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.stats import kurtosis, pearsonr, skew, spearmanr
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.neural_network import MLPRegressor
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
 from milling_experiment_framework.experiments.execution_path import execution_index_fields
+from milling_experiment_framework.experiments.h2_execution_utils import (
+    concat_existing_new,
+    atomic_signature,
+    effective_seeds_for_model,
+    existing_run_signatures,
+    model_seed_value,
+    ModelProgressReporter,
+    ordered_h2_models,
+    planned_atomic_count,
+    print_runtime_estimate_and_confirm,
+    read_existing_csv,
+    reusable_h2_experiment_id,
+    seed_label,
+)
+from milling_experiment_framework.models.h2_regressors import (
+    create_h2_feature_pipeline,
+    h2_model_catalog,
+    resolve_h2_model_defaults,
+)
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
 
 CASE_SCOPE = [1, 2, 8, 9, 12, 14]
-DOMAIN_CASES = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
-SHIFT_SCENARIOS = [("A", "B"), ("A", "C"), ("B", "A"), ("B", "C"), ("C", "A"), ("C", "B")]
+CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
+TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
+DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
+SHIFT_SCENARIOS = [(f"train_without_case_{case}", f"case_{case}") for case in CASE_SCOPE]
 SEGMENT_SETTINGS = [
     "full_length",
     "steady",
@@ -41,6 +58,7 @@ SEGMENT_SETTINGS = [
     "steady_exit",
     "entry_steady_exit",
 ]
+SENSOR_SETTING = "all_sensors"
 FEATURE_NAMES = [
     "mean",
     "std",
@@ -68,12 +86,11 @@ class S1RunConfig:
     heuristic_sequence_path: Path
     seeds: list[int]
     models: list[str]
-    random_forest_params: dict[str, Any]
-    mlp_params: dict[str, Any]
+    model_params: dict[str, dict[str, Any]]
 
 
 class S1SegmentExecution:
-    """Execute S1 segment-setting effect experiment exactly over the fixed case-pair protocol."""
+    """Execute S1 segment-setting effect experiment with leave-one-case-out testing."""
 
     def __init__(
         self,
@@ -81,11 +98,14 @@ class S1SegmentExecution:
         root: str | Path = ".",
         dry_run: bool = False,
         seed_mode: str = "initial",
+        assume_yes: bool = False,
     ):
         self.config_path = Path(config_path)
         self.root = Path(root).resolve()
         self.dry_run = dry_run
         self.seed_mode = seed_mode
+        self.assume_yes = assume_yes
+        self.skipped: list[dict[str, Any]] = []
 
     def run(self) -> dict[str, Any]:
         raw_config = self._read_config()
@@ -108,7 +128,7 @@ class S1SegmentExecution:
             dataset = self._load_dataset(run_config)
             sensors = self._sensor_columns(dataset)
             feature_table = self._build_feature_table(dataset, sensors)
-            dry_summary = self._dry_run_summary(dataset, feature_table, sensors, run_config.seeds)
+            dry_summary = self._dry_run_summary(dataset, feature_table, sensors, run_config)
             self._write_common_data_artifacts(paths, dataset, feature_table, dry_summary, resolved_config)
             if self.dry_run:
                 self._write_dry_run_outputs(paths, dry_summary)
@@ -116,7 +136,16 @@ class S1SegmentExecution:
                 logger.info(f"S1 dry-run finished: {experiment_id}")
                 return {"experiment_id": experiment_id, "dry_run": True, "summary": dry_summary, "execution_dir": str(paths.execution_dir)}
 
-            results = self._run_grid(feature_table, sensors, run_config, logger)
+            print_runtime_estimate_and_confirm(
+                "H2.S1 segment setting effect",
+                run_config.models,
+                run_config.seeds,
+                condition_count=len(SEGMENT_SETTINGS),
+                test_count=len(SHIFT_SCENARIOS),
+                config=raw_config,
+                assume_yes=self.assume_yes,
+            )
+            results = self._run_grid(feature_table, sensors, run_config, logger, paths)
             self._write_results(paths, resolved_config, results, dry_summary, sensors, run_config)
             self._update_index(resolved_config, status="finished", best_metric=self._best_metric(results["segment_metrics"]))
             logger.info(f"S1 execution finished: {experiment_id}")
@@ -148,7 +177,7 @@ class S1SegmentExecution:
             seeds = seed_list
         else:
             seeds = [int(s) for s in self.seed_mode.split(",") if s.strip()]
-        models = config.get("models", ["random_forest", "mlp"])
+        models = ordered_h2_models(config.get("models", ["random_forest", "mlp"]))
         model_cfg = config.get("model_defaults", {})
         return S1RunConfig(
             process_info_path=Path(config["dataset"]["process_info_path"]),
@@ -156,14 +185,17 @@ class S1SegmentExecution:
             heuristic_sequence_path=Path(config["dataset"]["heuristic_sequence_path"]),
             seeds=[int(seed) for seed in seeds],
             models=models,
-            random_forest_params=dict(model_cfg.get("random_forest", {})),
-            mlp_params=dict(model_cfg.get("mlp", {})),
+            model_params=resolve_h2_model_defaults(model_cfg),
         )
 
     def _generate_experiment_id(self) -> str:
-        now = datetime.now().strftime("%Y-%m-%d_%H%M%S_%f")
-        seed_tag = "dry_run" if self.dry_run else f"seeds_{self.seed_mode}"
-        return f"{now}_S1_all_models_all_sensors_all_segments_all_shifts_{seed_tag}"
+        return reusable_h2_experiment_id(
+            self.root,
+            scenario_id="S1",
+            topic="segment_setting_effect_all_sensors_all_features_VB_prediction",
+            dry_run=self.dry_run,
+            seed_mode=self.seed_mode,
+        )
 
     def _resolved_config(self, raw_config: dict[str, Any], run_config: S1RunConfig, experiment_id: str) -> dict[str, Any]:
         resolved = dict(raw_config)
@@ -179,10 +211,13 @@ class S1SegmentExecution:
         resolved["case_scope"] = CASE_SCOPE
         resolved["domain_cases"] = DOMAIN_CASES
         resolved["shift_scenarios"] = [f"{source}_to_{target}" for source, target in SHIFT_SCENARIOS]
+        resolved["split_strategy"] = "leave_one_case_out_no_validation"
         resolved["segment_settings"] = SEGMENT_SETTINGS
         resolved["feature_names"] = FEATURE_NAMES
-        resolved["sensors"] = "resolved_at_runtime"
+        resolved["sensor_setting"] = SENSOR_SETTING
+        resolved["sensors"] = "all_runtime_sensors"
         resolved["seeds"] = run_config.seeds
+        resolved["model_catalog"] = h2_model_catalog(run_config.model_params)
         resolved["dry_run"] = self.dry_run
         resolved["config_hash"] = stable_hash(resolved)
         return resolved
@@ -278,7 +313,7 @@ class S1SegmentExecution:
         idx_start = int(np.clip(row["idx_start"], idx_noload_end, n))
         idx_end = int(np.clip(row["idx_end"], idx_start, n))
         return {
-            "full_length": arr[:n],
+            "full_length": arr[idx_noload_end:n],
             "entry": arr[idx_noload_end:idx_start],
             "steady": arr[idx_start:idx_end],
             "exit": arr[idx_end:n],
@@ -320,7 +355,7 @@ class S1SegmentExecution:
             }
         return {key: (0.0 if not np.isfinite(value) else value) for key, value in raw.items()}
 
-    def _dry_run_summary(self, dataset: pd.DataFrame, feature_table: pd.DataFrame, sensors: list[str], seeds: list[int]) -> dict[str, Any]:
+    def _dry_run_summary(self, dataset: pd.DataFrame, feature_table: pd.DataFrame, sensors: list[str], run_config: S1RunConfig) -> dict[str, Any]:
         availability = (
             feature_table.groupby(["sensor", "segment_setting"])
             .size()
@@ -342,53 +377,100 @@ class S1SegmentExecution:
         return {
             "case_scope": CASE_SCOPE,
             "rows_by_case": dataset.groupby("case").size().to_dict(),
+            "sensor_setting": SENSOR_SETTING,
             "sensors": sensors,
+            "no_load_excluded": True,
             "segment_settings": SEGMENT_SETTINGS,
             "feature_names": FEATURE_NAMES,
             "feature_availability": availability,
             "shift_splits": split_counts,
-            "models": ["random_forest", "mlp"],
-            "seeds": seeds,
-            "planned_atomic_executions": len(SHIFT_SCENARIOS) * 2 * len(sensors) * len(SEGMENT_SETTINGS) * len(seeds),
+            "models": run_config.models,
+            "model_catalog": h2_model_catalog(run_config.model_params),
+            "seeds": run_config.seeds,
+            "effective_seed_policy": "linear_regression and svr run once with seed=-1; seeded models use the configured seeds",
+            "planned_atomic_executions": planned_atomic_count(run_config.models, run_config.seeds, len(SEGMENT_SETTINGS), len(SHIFT_SCENARIOS)),
             "h1s1_association_reference": self._association_reference_status(),
         }
 
-    def _run_grid(self, feature_table: pd.DataFrame, sensors: list[str], run_config: S1RunConfig, logger: ExperimentLogger) -> dict[str, Any]:
+    def _all_sensor_segment_tables(self, feature_table: pd.DataFrame, sensors: list[str]) -> dict[str, pd.DataFrame]:
+        sample_cols = ["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB"]
+        tables: dict[str, pd.DataFrame] = {}
+        for segment_setting in SEGMENT_SETTINGS:
+            segment_rows = feature_table.loc[feature_table["segment_setting"] == segment_setting]
+            table = segment_rows[sample_cols].drop_duplicates().reset_index(drop=True)
+            for sensor in sensors:
+                sensor_rows = segment_rows.loc[segment_rows["sensor"] == sensor, sample_cols + FEATURE_NAMES].copy()
+                rename = {name: f"{sensor}__{segment_setting}__{name}" for name in FEATURE_NAMES}
+                sensor_rows = sensor_rows.rename(columns=rename)
+                table = table.merge(sensor_rows[sample_cols + list(rename.values())], on=sample_cols, how="inner", validate="one_to_one")
+            tables[segment_setting] = table
+        return tables
+
+    def _run_grid(self, feature_table: pd.DataFrame, sensors: list[str], run_config: S1RunConfig, logger: ExperimentLogger, paths: ExperimentPaths) -> dict[str, Any]:
         shift_rows: list[dict[str, Any]] = []
         prediction_rows: list[pd.DataFrame] = []
         split_rows: list[pd.DataFrame] = []
-        total = len(run_config.models) * len(sensors) * len(SEGMENT_SETTINGS) * len(run_config.seeds) * len(SHIFT_SCENARIOS)
+        existing_shift = read_existing_csv(paths.execution_dir / "metrics" / "shift_metrics.csv")
+        existing_predictions = read_existing_csv(paths.execution_dir / "predictions" / "predictions.csv")
+        existing_splits = read_existing_csv(paths.execution_dir / "splits" / "split.csv")
+        completed = existing_run_signatures(existing_shift)
+        segment_tables = self._all_sensor_segment_tables(feature_table, sensors)
+        total = planned_atomic_count(run_config.models, run_config.seeds, len(SEGMENT_SETTINGS), len(SHIFT_SCENARIOS))
         done = 0
+        included_sensors = ",".join(sensors)
+        progress = ModelProgressReporter("H2.S1")
         for model_name in run_config.models:
-            for sensor in sensors:
-                for segment_setting in SEGMENT_SETTINGS:
-                    condition = feature_table.loc[
-                        (feature_table["sensor"] == sensor) & (feature_table["segment_setting"] == segment_setting)
-                    ].copy()
-                    X_cols = FEATURE_NAMES
-                    self._assert_no_leakage_features(X_cols)
-                    for seed in run_config.seeds:
-                        for source, target in SHIFT_SCENARIOS:
-                            done += 1
-                            result, preds, splits = self._run_atomic(
-                                model_name=model_name,
-                                sensor=sensor,
-                                segment_setting=segment_setting,
-                                seed=seed,
-                                source_domain=source,
-                                target_domain=target,
-                                data=condition,
-                                feature_columns=X_cols,
-                                run_config=run_config,
-                            )
-                            shift_rows.append(result)
-                            prediction_rows.append(preds)
-                            split_rows.append(splits)
-                            if done % 500 == 0 or done == total:
-                                logger.info(f"S1 progress {done}/{total}")
-        shift_metrics = pd.DataFrame(shift_rows)
-        predictions = pd.concat(prediction_rows, ignore_index=True)
-        splits = pd.concat(split_rows, ignore_index=True)
+            model_total = len(effective_seeds_for_model(model_name, run_config.seeds)) * len(SEGMENT_SETTINGS) * len(SHIFT_SCENARIOS)
+            progress.start_model(model_name, model_total)
+            for segment_setting in SEGMENT_SETTINGS:
+                condition = segment_tables[segment_setting]
+                X_cols = [c for c in condition.columns if "__" in c]
+                self._assert_no_leakage_features(X_cols)
+                for seed in effective_seeds_for_model(model_name, run_config.seeds):
+                    for source, target in SHIFT_SCENARIOS:
+                        done += 1
+                        child_key = f"S1_{model_name}_{SENSOR_SETTING}_{segment_setting}_{source}_to_{target}_seed_{seed_label(seed)}"
+                        signature = atomic_signature(
+                            {
+                                "experiment": "H2_S1",
+                                "model": model_name,
+                                "model_params": run_config.model_params.get(model_name, {}),
+                                "sensor_setting": SENSOR_SETTING,
+                                "included_sensors": included_sensors,
+                                "segment_setting": segment_setting,
+                                "feature_columns": X_cols,
+                                "seed": seed,
+                                "source_domain": source,
+                                "target_domain": target,
+                            }
+                        )
+                        if signature in completed:
+                            self.skipped.append({"child_execution_key": child_key, "run_signature": signature, "model": model_name, "seed": seed, "reason": "existing_result_same_setting"})
+                            progress.step(skipped=True)
+                            continue
+                        result, preds, splits = self._run_atomic(
+                            model_name=model_name,
+                            sensor=SENSOR_SETTING,
+                            included_sensors=included_sensors,
+                            segment_setting=segment_setting,
+                            seed=seed,
+                            source_domain=source,
+                            target_domain=target,
+                            data=condition,
+                            feature_columns=X_cols,
+                            run_config=run_config,
+                            child_key=child_key,
+                            run_signature=signature,
+                        )
+                        shift_rows.append(result)
+                        prediction_rows.append(preds)
+                        split_rows.append(splits)
+                        progress.step(skipped=False)
+                        if done % 500 == 0 or done == total:
+                            logger.info(f"S1 progress {done}/{total}")
+        shift_metrics = concat_existing_new(existing_shift, shift_rows)
+        predictions = concat_existing_new(existing_predictions, prediction_rows)
+        splits = concat_existing_new(existing_splits, split_rows)
         seed_metrics = self._seed_metrics(shift_metrics)
         segment_metrics = self._segment_metrics(seed_metrics)
         baseline_improvement = self._baseline_improvement(segment_metrics)
@@ -414,6 +496,7 @@ class S1SegmentExecution:
         self,
         model_name: str,
         sensor: str,
+        included_sensors: str,
         segment_setting: str,
         seed: int,
         source_domain: str,
@@ -421,24 +504,28 @@ class S1SegmentExecution:
         data: pd.DataFrame,
         feature_columns: list[str],
         run_config: S1RunConfig,
+        child_key: str,
+        run_signature: str,
     ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
         split = self._split_frame(data, source_domain, target_domain)
         train = split.loc[split["split"] == "train"].copy()
         test = split.loc[split["split"] == "test"].copy()
         if train.empty or test.empty:
             raise ValueError(f"Empty train/test split for {source_domain}_to_{target_domain}")
-        model = self._model(model_name, seed, run_config)
+        model = self._model(model_name, model_seed_value(seed), run_config)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model.fit(train[feature_columns], train["VB"])
         y_pred = model.predict(test[feature_columns])
         metrics = self._metrics(test["VB"].to_numpy(), y_pred)
-        child_key = f"S1_{model_name}_{sensor}_{segment_setting}_{source_domain}_to_{target_domain}_seed_{seed}"
         result = {
             "experiment_id": None,
             "child_execution_key": child_key,
+            "run_signature": run_signature,
             "model": model_name,
             "sensor": sensor,
+            "sensor_setting": sensor,
+            "included_sensors": included_sensors,
             "segment_setting": segment_setting,
             "seed": seed,
             "source_domain": source_domain,
@@ -449,8 +536,11 @@ class S1SegmentExecution:
         }
         preds = test[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB"]].copy()
         preds["child_execution_key"] = child_key
+        preds["run_signature"] = run_signature
         preds["model"] = model_name
         preds["sensor"] = sensor
+        preds["sensor_setting"] = sensor
+        preds["included_sensors"] = included_sensors
         preds["segment_setting"] = segment_setting
         preds["seed"] = seed
         preds["source_domain"] = source_domain
@@ -462,37 +552,27 @@ class S1SegmentExecution:
         preds["absolute_error"] = preds["residual"].abs()
         split_out = split[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB", "split"]].copy()
         split_out["child_execution_key"] = child_key
+        split_out["run_signature"] = run_signature
         split_out["model"] = model_name
         split_out["sensor"] = sensor
+        split_out["sensor_setting"] = sensor
+        split_out["included_sensors"] = included_sensors
         split_out["segment_setting"] = segment_setting
         split_out["seed"] = seed
         split_out["source_domain"] = source_domain
         split_out["target_domain"] = target_domain
         return result, preds, split_out
 
-    def _model(self, model_name: str, seed: int, run_config: S1RunConfig) -> Pipeline:
-        if model_name == "random_forest":
-            params = dict(run_config.random_forest_params)
-            params.setdefault("random_state", seed)
-            return Pipeline([("scaler", StandardScaler()), ("model", RandomForestRegressor(**params))])
-        if model_name == "mlp":
-            params = dict(run_config.mlp_params)
-            params.setdefault("hidden_layer_sizes", (64, 32, 16))
-            params.setdefault("random_state", seed)
-            params.setdefault("max_iter", 300)
-            params.setdefault("learning_rate_init", 0.001)
-            return Pipeline([("scaler", StandardScaler()), ("model", MLPRegressor(**params))])
-        raise ValueError(f"Unsupported model: {model_name}")
+    def _model(self, model_name: str, seed: int, run_config: S1RunConfig):
+        return create_h2_feature_pipeline(model_name, seed, run_config.model_params)
 
     def _split_frame(self, data: pd.DataFrame, source_domain: str, target_domain: str) -> pd.DataFrame:
         source_cases = DOMAIN_CASES[source_domain]
         target_cases = DOMAIN_CASES[target_domain]
-        validation_case = min(source_cases)
         split = data.loc[data["case"].isin(source_cases + target_cases)].copy()
         split["split"] = "excluded"
         split.loc[split["case"].isin(target_cases), "split"] = "test"
-        split.loc[split["case"].isin(source_cases) & (split["case"] != validation_case), "split"] = "train"
-        split.loc[split["case"] == validation_case, "split"] = "validation"
+        split.loc[split["case"].isin(source_cases), "split"] = "train"
         return split
 
     def _metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
@@ -612,7 +692,7 @@ class S1SegmentExecution:
     def _metrics_json(self, segment_metrics: pd.DataFrame) -> dict[str, Any]:
         best = segment_metrics.loc[segment_metrics["mean_mae"].idxmin()].to_dict()
         return {
-            "aggregation": "mean_over_6_domain_shifts_then_mean_std_over_seeds",
+            "aggregation": "mean_over_6_leave_one_case_tests_then_mean_std_over_seeds",
             "shift_scenarios": [f"{source}_to_{target}" for source, target in SHIFT_SCENARIOS],
             "primary_metric": "mean_mae",
             "best_overall_by_mae": best,
@@ -704,6 +784,7 @@ class S1SegmentExecution:
             "sample_overlap_checks": duplicate_checks,
             "scaling_fit_policy": "sklearn Pipeline fits StandardScaler on train split only for each atomic execution",
             "feature_leakage_check": "VB excluded from feature_columns; feature_columns are signal-derived only",
+            "validation_policy": "no validation split",
         }
 
     def _analysis_summary(self, results: dict[str, Any], sensors: list[str], run_config: S1RunConfig) -> dict[str, Any]:
@@ -712,8 +793,11 @@ class S1SegmentExecution:
             "objective": "S1 segment setting effect on VB prediction",
             "models": run_config.models,
             "sensors": sensors,
+            "sensor_setting": SENSOR_SETTING,
             "segment_settings": SEGMENT_SETTINGS,
             "seeds": run_config.seeds,
+            "skipped_condition_count": len(self.skipped),
+            "skip_reasons": pd.DataFrame(self.skipped)["reason"].value_counts().to_dict() if self.skipped else {},
             "num_atomic_executions": len(results["shift_metrics"]),
             "best_overall_by_mae": best,
             "h1s1_association": "H1.S1 association reference unavailable",
@@ -798,7 +882,7 @@ Dry-run completed.
 - Signal data: `datasets/processed/mill_signal_data_enabled.csv`
 - Heuristic sequence: `datasets/metadata/heuristic_sequence.csv`
 - Cases: {CASE_SCOPE}
-- Domains: {DOMAIN_CASES}
+- Leave-one-case-out cases: {CASE_SCOPE}
 - Sensors: {dry_summary['sensors']}
 - Segment settings: {SEGMENT_SETTINGS}
 - Planned atomic executions: {dry_summary['planned_atomic_executions']}
@@ -821,8 +905,9 @@ Evaluate whether segment setting changes VB prediction performance and whether a
 
 - Data files: `datasets/processed/mill_process_info_enabled.csv`, `datasets/processed/mill_signal_data_enabled.csv`
 - Cases: {CASE_SCOPE}
-- Domain pairs: {DOMAIN_CASES}
-- Shift scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}
+- Leave-one-case-out cases: {CASE_SCOPE}
+- Cross-test scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}
+- Validation: none
 - Sensors: {dry_summary['sensors']}
 - Segment settings: {SEGMENT_SETTINGS}
 - Models: {dry_summary['models']}
@@ -887,7 +972,7 @@ H1.S1 association reference unavailable. RQ4 is deferred.
             "dataset": "mill_processed_enabled",
             "model": "random_forest,mlp",
             "input_type": "feature-based",
-            "split_strategy": "fixed_case_pair_domain_shift",
+            "split_strategy": "leave_one_case_out_no_validation",
             "steady_cut_mode": "segmentation",
             "status": status,
             "best_metric": best_metric,

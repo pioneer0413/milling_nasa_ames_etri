@@ -15,6 +15,20 @@ from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
 from milling_experiment_framework.experiments.execution_path import execution_index_fields
+from milling_experiment_framework.experiments.h2_execution_utils import (
+    concat_existing_new,
+    atomic_signature,
+    effective_seeds_for_model,
+    existing_run_signatures,
+    model_seed_value,
+    ModelProgressReporter,
+    ordered_h2_models,
+    planned_atomic_count,
+    print_runtime_estimate_and_confirm,
+    read_existing_csv,
+    reusable_h2_experiment_id,
+    seed_label,
+)
 from milling_experiment_framework.experiments.s1_segment_execution import (
     CASE_SCOPE,
     DOMAIN_CASES,
@@ -24,6 +38,7 @@ from milling_experiment_framework.experiments.s1_segment_execution import (
     S1RunConfig,
     S1SegmentExecution,
 )
+from milling_experiment_framework.models.h2_regressors import h2_model_catalog, resolve_h2_model_defaults
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
@@ -48,11 +63,12 @@ SINGLE_GROUPS = {"current", "vibration", "acoustic"}
 class S2SensorCombinationExecution:
     """Run S2 segment-aware VB prediction over fixed sensor group combinations."""
 
-    def __init__(self, config_path: str | Path, root: str | Path = ".", dry_run: bool = False, seed_mode: str = "initial"):
+    def __init__(self, config_path: str | Path, root: str | Path = ".", dry_run: bool = False, seed_mode: str = "initial", assume_yes: bool = False):
         self.config_path = Path(config_path)
         self.root = Path(root).resolve()
         self.dry_run = dry_run
         self.seed_mode = seed_mode
+        self.assume_yes = assume_yes
         self.skipped: list[dict[str, Any]] = []
 
     def run(self) -> dict[str, Any]:
@@ -90,7 +106,16 @@ class S2SensorCombinationExecution:
                 logger.info(f"S2 dry-run finished: {experiment_id}")
                 return {"experiment_id": experiment_id, "dry_run": True, "summary": dry_summary, "execution_dir": str(paths.execution_dir)}
 
-            results = self._run_grid(combo_features, mapping, run_config, logger)
+            print_runtime_estimate_and_confirm(
+                "H2.S2 sensor combination effect",
+                run_config.models,
+                run_config.seeds,
+                condition_count=len(SENSOR_COMBINATIONS) * len(SEGMENT_SETTINGS),
+                test_count=len(SHIFT_SCENARIOS),
+                config=raw_config,
+                assume_yes=self.assume_yes,
+            )
+            results = self._run_grid(combo_features, mapping, run_config, logger, paths)
             self._write_results(paths, config, results, dry_summary, run_config)
             (paths.execution_dir / "logs" / "error.log").touch()
             self._update_index(config, "finished", self._best_metric(results["sensor_combination_metrics"]))
@@ -126,14 +151,18 @@ class S2SensorCombinationExecution:
             signal_data_path=Path(config["dataset"]["signal_data_path"]),
             heuristic_sequence_path=Path(config["dataset"]["heuristic_sequence_path"]),
             seeds=[int(seed) for seed in seeds],
-            models=config.get("models", ["random_forest", "mlp"]),
-            random_forest_params=dict(model_cfg.get("random_forest", {})),
-            mlp_params=dict(model_cfg.get("mlp", {})),
+            models=ordered_h2_models(config.get("models", ["random_forest", "mlp"])),
+            model_params=resolve_h2_model_defaults(model_cfg),
         )
 
     def _generate_experiment_id(self) -> str:
-        suffix = "dry_run" if self.dry_run else f"seeds_{self.seed_mode}"
-        return datetime.now().strftime("%Y-%m-%d_%H%M%S_%f") + f"_S2_sensor_combination_segment_aware_VB_prediction_{suffix}"
+        return reusable_h2_experiment_id(
+            self.root,
+            scenario_id="S2",
+            topic="sensor_combination_effect_segment_aware_VB_prediction",
+            dry_run=self.dry_run,
+            seed_mode=self.seed_mode,
+        )
 
     def _resolved_config(self, raw_config: dict[str, Any], run_config: S1RunConfig, experiment_id: str) -> dict[str, Any]:
         config = dict(raw_config)
@@ -153,8 +182,9 @@ class S2SensorCombinationExecution:
         config["segment_settings"] = SEGMENT_SETTINGS
         config["feature_names"] = FEATURE_NAMES
         config["seeds"] = run_config.seeds
+        config["model_catalog"] = h2_model_catalog(run_config.model_params)
         config["dry_run"] = self.dry_run
-        config["scaling_policy"] = "StandardScaler fit on train split only for both RandomForest and MLP pipelines"
+        config["scaling_policy"] = "StandardScaler fit on train split only for all H2 feature-based model pipelines"
         config["config_hash"] = stable_hash(config)
         return config
 
@@ -241,28 +271,56 @@ class S2SensorCombinationExecution:
             "feature_names": FEATURE_NAMES,
             "models": run_config.models,
             "seeds": run_config.seeds,
-            "planned_atomic_evaluations": len(SHIFT_SCENARIOS) * len(run_config.models) * len(SENSOR_COMBINATIONS) * len(SEGMENT_SETTINGS) * len(run_config.seeds),
+            "effective_seed_policy": "linear_regression and svr run once with seed=-1; seeded models use the configured seeds",
+            "planned_atomic_evaluations": planned_atomic_count(run_config.models, run_config.seeds, len(SENSOR_COMBINATIONS) * len(SEGMENT_SETTINGS), len(SHIFT_SCENARIOS)),
             "combination_feature_shapes": {f"{combo}/{segment}": list(table.shape) for (combo, segment), table in combo_features.items()},
             "sensor_group_mapping": mapping.to_dict(orient="records"),
         }
 
-    def _run_grid(self, combo_features: dict[tuple[str, str], pd.DataFrame], mapping: pd.DataFrame, run_config: S1RunConfig, logger: ExperimentLogger) -> dict[str, Any]:
+    def _run_grid(self, combo_features: dict[tuple[str, str], pd.DataFrame], mapping: pd.DataFrame, run_config: S1RunConfig, logger: ExperimentLogger, paths: ExperimentPaths) -> dict[str, Any]:
         helper = S1SegmentExecution(self.config_path, root=self.root, dry_run=False, seed_mode=self.seed_mode)
         shift_rows = []
         prediction_frames = []
         split_frames = []
-        total = len(run_config.models) * len(SENSOR_COMBINATIONS) * len(SEGMENT_SETTINGS) * len(run_config.seeds) * len(SHIFT_SCENARIOS)
+        existing_shift = read_existing_csv(paths.execution_dir / "metrics" / "shift_metrics.csv")
+        existing_predictions = read_existing_csv(paths.execution_dir / "predictions" / "predictions.csv")
+        existing_splits = read_existing_csv(paths.execution_dir / "splits" / "split.csv")
+        completed = existing_run_signatures(existing_shift)
+        total = planned_atomic_count(run_config.models, run_config.seeds, len(SENSOR_COMBINATIONS) * len(SEGMENT_SETTINGS), len(SHIFT_SCENARIOS))
         done = 0
+        progress = ModelProgressReporter("H2.S2")
         for model_name in run_config.models:
+            model_total = len(effective_seeds_for_model(model_name, run_config.seeds)) * len(SENSOR_COMBINATIONS) * len(SEGMENT_SETTINGS) * len(SHIFT_SCENARIOS)
+            progress.start_model(model_name, model_total)
             for sensor_combo, groups in SENSOR_COMBINATIONS.items():
                 included_sensors = self._included_sensors(mapping, sensor_combo)
                 included_groups = ",".join(groups)
                 for segment in SEGMENT_SETTINGS:
                     data = combo_features[(sensor_combo, segment)]
                     feature_cols = [c for c in data.columns if "__" in c]
-                    for seed in run_config.seeds:
+                    for seed in effective_seeds_for_model(model_name, run_config.seeds):
                         for source, target in SHIFT_SCENARIOS:
                             done += 1
+                            child = f"S2_{model_name}_{sensor_combo}_{segment}_{source}_to_{target}_seed_{seed_label(seed)}"
+                            signature = atomic_signature(
+                                {
+                                    "experiment": "H2_S2",
+                                    "model": model_name,
+                                    "model_params": run_config.model_params.get(model_name, {}),
+                                    "sensor_combination": sensor_combo,
+                                    "included_sensor_groups": included_groups,
+                                    "included_sensors": included_sensors,
+                                    "segment_setting": segment,
+                                    "feature_columns": feature_cols,
+                                    "seed": seed,
+                                    "source_domain": source,
+                                    "target_domain": target,
+                                }
+                            )
+                            if signature in completed:
+                                self.skipped.append({"child_execution_key": child, "run_signature": signature, "model": model_name, "seed": seed, "reason": "existing_result_same_setting"})
+                                progress.step(skipped=True)
+                                continue
                             result, preds, splits = self._run_atomic(
                                 helper,
                                 model_name,
@@ -276,13 +334,16 @@ class S2SensorCombinationExecution:
                                 data,
                                 feature_cols,
                                 run_config,
+                                child,
+                                signature,
                             )
                             shift_rows.append(result)
                             prediction_frames.append(preds)
                             split_frames.append(splits)
+                            progress.step(skipped=False)
                             if done % 500 == 0 or done == total:
                                 logger.info(f"S2 progress {done}/{total}")
-        shift_metrics = pd.DataFrame(shift_rows)
+        shift_metrics = concat_existing_new(existing_shift, shift_rows)
         seed_metrics = self._seed_metrics(shift_metrics)
         combo_metrics = self._combo_metrics(seed_metrics)
         segment_metrics = self._segment_metrics(seed_metrics)
@@ -299,8 +360,8 @@ class S2SensorCombinationExecution:
             "sensor_combination_metrics": combo_metrics,
             "segment_metrics": segment_metrics,
             "comparison_metrics": baseline,
-            "predictions": pd.concat(prediction_frames, ignore_index=True),
-            "splits": pd.concat(split_frames, ignore_index=True),
+            "predictions": concat_existing_new(existing_predictions, prediction_frames),
+            "splits": concat_existing_new(existing_splits, split_frames),
             "sensor_combination_effect": sensor_effect,
             "best_sensor_combination": best_combo,
             "segment_effect_under_sensor_combination": segment_effect,
@@ -310,18 +371,18 @@ class S2SensorCombinationExecution:
             "metrics_json": metrics_json,
         }
 
-    def _run_atomic(self, helper: S1SegmentExecution, model_name: str, sensor_combo: str, groups: str, sensors: str, segment: str, seed: int, source: str, target: str, data: pd.DataFrame, feature_cols: list[str], run_config: S1RunConfig):
+    def _run_atomic(self, helper: S1SegmentExecution, model_name: str, sensor_combo: str, groups: str, sensors: str, segment: str, seed: int, source: str, target: str, data: pd.DataFrame, feature_cols: list[str], run_config: S1RunConfig, child: str, run_signature: str):
         split = helper._split_frame(data, source, target)
         train = split.loc[split["split"] == "train"]
         test = split.loc[split["split"] == "test"]
-        model = helper._model(model_name, seed, run_config)
+        model = helper._model(model_name, model_seed_value(seed), run_config)
         model.fit(train[feature_cols], train["VB"])
         y_pred = model.predict(test[feature_cols])
         metrics = helper._metrics(test["VB"].to_numpy(), y_pred)
-        child = f"S2_{model_name}_{sensor_combo}_{segment}_{source}_to_{target}_seed_{seed}"
         row = {
             "experiment_id": None,
             "child_execution_key": child,
+            "run_signature": run_signature,
             "model": model_name,
             "sensor_combination": sensor_combo,
             "included_sensor_groups": groups,
@@ -336,6 +397,7 @@ class S2SensorCombinationExecution:
         }
         preds = test[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB"]].copy()
         preds["child_execution_key"] = child
+        preds["run_signature"] = run_signature
         preds["model"] = model_name
         preds["sensor_combination"] = sensor_combo
         preds["included_sensor_groups"] = groups
@@ -351,6 +413,7 @@ class S2SensorCombinationExecution:
         preds["absolute_error"] = preds["residual"].abs()
         split_out = split[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB", "split"]].copy()
         split_out["child_execution_key"] = child
+        split_out["run_signature"] = run_signature
         split_out["model"] = model_name
         split_out["sensor_combination"] = sensor_combo
         split_out["segment_setting"] = segment
@@ -566,7 +629,7 @@ class S2SensorCombinationExecution:
         best = metrics.loc[metrics["mean_mae"].idxmin()].to_dict()
         all_best_ratio = float(best_combo["is_all_sensor_combination_best_by_r2"].mean()) if not best_combo.empty else 0.0
         return {
-            "aggregation": "mean_over_6_domain_shifts_then_mean_std_over_seeds",
+            "aggregation": "mean_over_6_leave_one_case_tests_then_mean_std_over_seeds",
             "primary_metric": "mean_mae",
             "best_overall_by_mae": best,
             "all_sensor_combination_best_by_r2_ratio": all_best_ratio,
@@ -716,7 +779,7 @@ class S2SensorCombinationExecution:
 Dry-run completed.
 
 - Cases: {CASE_SCOPE}
-- Domain pairs: {DOMAIN_CASES}
+- Leave-one-case-out cases: {CASE_SCOPE}
 - Sensors: {dry_summary['sensors']}
 - Sensor groups: {SENSOR_GROUPS}
 - Sensor combinations: {list(SENSOR_COMBINATIONS)}
@@ -739,8 +802,9 @@ Evaluate whether sensor group combinations improve segment-aware VB prediction u
 
 - Data files: `datasets/processed/mill_process_info_enabled.csv`, `datasets/processed/mill_signal_data_enabled.csv`
 - Cases: {CASE_SCOPE}
-- Domain pairs: {DOMAIN_CASES}
-- Shift scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}
+- Leave-one-case-out cases: {CASE_SCOPE}
+- Cross-test scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}
+- Validation: none
 - Sensor groups: {SENSOR_GROUPS}
 - Sensor combinations: {list(SENSOR_COMBINATIONS)}
 - Segment settings: {SEGMENT_SETTINGS}
@@ -813,7 +877,7 @@ Evaluate whether sensor group combinations improve segment-aware VB prediction u
             "dataset": "mill_processed_enabled",
             "model": "random_forest,mlp",
             "input_type": "feature-based",
-            "split_strategy": "fixed_case_pair_domain_shift",
+            "split_strategy": "leave_one_case_out_no_validation",
             "steady_cut_mode": "segmentation_no_noload",
             "status": status,
             "best_metric": best_metric,

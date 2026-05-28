@@ -11,9 +11,7 @@ from typing import Any
 import pandas as pd
 from pandas.api.types import is_string_dtype
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -22,6 +20,20 @@ from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
 from milling_experiment_framework.experiments.execution_path import execution_index_fields
+from milling_experiment_framework.experiments.h2_execution_utils import (
+    concat_existing_new,
+    atomic_signature,
+    effective_seeds_for_model,
+    existing_run_signatures,
+    model_seed_value,
+    ModelProgressReporter,
+    ordered_h2_models,
+    planned_atomic_count,
+    print_runtime_estimate_and_confirm,
+    read_existing_csv,
+    reusable_h2_experiment_id,
+    seed_label,
+)
 from milling_experiment_framework.experiments.s1_segment_execution import (
     CASE_SCOPE,
     DOMAIN_CASES,
@@ -30,6 +42,11 @@ from milling_experiment_framework.experiments.s1_segment_execution import (
     SHIFT_SCENARIOS,
     S1RunConfig,
     S1SegmentExecution,
+)
+from milling_experiment_framework.models.h2_regressors import (
+    create_h2_regressor,
+    h2_model_catalog,
+    resolve_h2_model_defaults,
 )
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
@@ -74,11 +91,12 @@ FACTOR_NAMES = {key: value["name"] for key, value in PROCESS_FACTORS.items()}
 class H2S4ProcessInformationExecution:
     """Run H2.S4 process-information combination experiment."""
 
-    def __init__(self, config_path: str | Path, root: str | Path = ".", dry_run: bool = False, seed_mode: str = "initial"):
+    def __init__(self, config_path: str | Path, root: str | Path = ".", dry_run: bool = False, seed_mode: str = "initial", assume_yes: bool = False):
         self.config_path = Path(config_path)
         self.root = Path(root).resolve()
         self.dry_run = dry_run
         self.seed_mode = seed_mode
+        self.assume_yes = assume_yes
         self.skipped: list[dict[str, Any]] = []
 
     def run(self) -> dict[str, Any]:
@@ -117,7 +135,16 @@ class H2S4ProcessInformationExecution:
                 logger.info(f"H2.S4 dry-run finished: {experiment_id}")
                 return {"experiment_id": experiment_id, "dry_run": True, "summary": dry_summary, "execution_dir": str(paths.execution_dir)}
 
-            results = self._run_grid(helper, tables, process_mapping, run_config, logger)
+            print_runtime_estimate_and_confirm(
+                "H2.S4 process information combination effect",
+                run_config.models,
+                run_config.seeds,
+                condition_count=len(tables),
+                test_count=len(SHIFT_SCENARIOS),
+                config=raw_config,
+                assume_yes=self.assume_yes,
+            )
+            results = self._run_grid(helper, tables, process_mapping, run_config, logger, paths)
             self._write_results(paths, config, results, dry_summary, process_mapping, run_config)
             (paths.execution_dir / "logs" / f"{PREFIX}_error.log").touch()
             self._update_index(config, "finished", self._best_metric(results["feature_group_metrics"]))
@@ -153,14 +180,18 @@ class H2S4ProcessInformationExecution:
             signal_data_path=Path(config["dataset"]["signal_data_path"]),
             heuristic_sequence_path=Path(config["dataset"]["heuristic_sequence_path"]),
             seeds=[int(seed) for seed in seeds],
-            models=config.get("models", ["random_forest", "mlp"]),
-            random_forest_params=dict(model_cfg.get("random_forest", {})),
-            mlp_params=dict(model_cfg.get("mlp", {})),
+            models=ordered_h2_models(config.get("models", ["random_forest", "mlp"])),
+            model_params=resolve_h2_model_defaults(model_cfg),
         )
 
     def _generate_experiment_id(self) -> str:
-        suffix = "dry_run" if self.dry_run else f"seeds_{self.seed_mode}"
-        return datetime.now().strftime("%Y-%m-%d_%H%M%S_%f") + f"_H2_S4_process_information_combination_segment_aware_VB_prediction_{suffix}"
+        return reusable_h2_experiment_id(
+            self.root,
+            scenario_id="S4",
+            topic="process_information_combination_all_sensors_all_features_segment_aware_VB_prediction",
+            dry_run=self.dry_run,
+            seed_mode=self.seed_mode,
+        )
 
     def _resolved_config(self, raw_config: dict[str, Any], run_config: S1RunConfig, experiment_id: str) -> dict[str, Any]:
         config = dict(raw_config)
@@ -179,10 +210,10 @@ class H2S4ProcessInformationExecution:
         config["expected_sensors"] = EXPECTED_SENSORS
         config["process_factors"] = PROCESS_FACTORS
         config["process_combinations"] = PROCESS_COMBINATIONS
-        config["feature_groups"] = ["sensor_only", "process_only", "sensor_plus_process"]
+        config["feature_groups"] = ["sensor_plus_process"]
         config["segment_settings"] = SEGMENT_SETTINGS
-        config["process_only_segment_setting"] = "segment_independent"
         config["seeds"] = run_config.seeds
+        config["model_catalog"] = h2_model_catalog(run_config.model_params)
         config["dry_run"] = self.dry_run
         config["scaling_policy"] = "Numeric imputer/scaler and categorical imputer/one-hot encoder fit on train split only"
         config["config_hash"] = stable_hash(config)
@@ -280,7 +311,6 @@ class H2S4ProcessInformationExecution:
         process_base = self._process_base_table(dataset, process_mapping)
         for segment in SEGMENT_SETTINGS:
             sensor_table = self._sensor_feature_table(feature_table, sensors, segment)
-            tables[("sensor_only", segment, "none")] = sensor_table
             for combo in PROCESS_COMBINATIONS:
                 process_cols = self._process_columns_for_combination(combo, process_mapping)
                 tables[("sensor_plus_process", segment, combo)] = sensor_table.merge(
@@ -289,9 +319,6 @@ class H2S4ProcessInformationExecution:
                     how="inner",
                     validate="one_to_one",
                 )
-        for combo in PROCESS_COMBINATIONS:
-            process_cols = self._process_columns_for_combination(combo, process_mapping)
-            tables[("process_only", "segment_independent", combo)] = process_base[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB"] + process_cols].copy()
         return tables
 
     def _validate_tables(self, dataset: pd.DataFrame, sensor_mapping: pd.DataFrame, process_mapping: pd.DataFrame, tables: dict[tuple[str, str, str], pd.DataFrame]) -> dict[str, Any]:
@@ -325,7 +352,7 @@ class H2S4ProcessInformationExecution:
                 "num_tables": len(tables),
                 "sensor_setting": SENSOR_SETTING,
                 "process_combinations": list(PROCESS_COMBINATIONS),
-                "feature_groups": ["sensor_only", "process_only", "sensor_plus_process"],
+                "feature_groups": ["sensor_plus_process"],
                 "table_shapes": {"/".join(k): list(v.shape) for k, v in tables.items()},
             },
         }
@@ -346,37 +373,63 @@ class H2S4ProcessInformationExecution:
             "process_combinations": PROCESS_COMBINATIONS,
             "process_columns_used": process_mapping.loc[process_mapping["used"], "source_column"].tolist(),
             "process_columns_excluded": process_mapping.loc[~process_mapping["used"], ["source_column", "reason_if_excluded"]].to_dict(orient="records"),
-            "feature_groups": ["sensor_only", "process_only", "sensor_plus_process"],
+            "feature_groups": ["sensor_plus_process"],
             "segment_settings": SEGMENT_SETTINGS,
             "models": run_config.models,
             "seeds": run_config.seeds,
-            "planned_atomic_evaluations": (
-                len(SHIFT_SCENARIOS)
-                * len(run_config.models)
-                * len(run_config.seeds)
-                * (len(SEGMENT_SETTINGS) + len(PROCESS_COMBINATIONS) + len(SEGMENT_SETTINGS) * len(PROCESS_COMBINATIONS))
-            ),
+            "effective_seed_policy": "linear_regression and svr run once with seed=-1; seeded models use the configured seeds",
+            "planned_atomic_evaluations": planned_atomic_count(run_config.models, run_config.seeds, len(SEGMENT_SETTINGS) * len(PROCESS_COMBINATIONS), len(SHIFT_SCENARIOS)),
             "condition_table_shapes": {"/".join(k): list(v.shape) for k, v in tables.items()},
         }
 
-    def _run_grid(self, helper: S1SegmentExecution, tables: dict[tuple[str, str, str], pd.DataFrame], process_mapping: pd.DataFrame, run_config: S1RunConfig, logger: ExperimentLogger) -> dict[str, Any]:
+    def _run_grid(self, helper: S1SegmentExecution, tables: dict[tuple[str, str, str], pd.DataFrame], process_mapping: pd.DataFrame, run_config: S1RunConfig, logger: ExperimentLogger, paths: ExperimentPaths) -> dict[str, Any]:
         shift_rows = []
         prediction_frames = []
         split_frames = []
         conditions = list(tables)
-        total = len(run_config.models) * len(conditions) * len(run_config.seeds) * len(SHIFT_SCENARIOS)
+        existing_shift = read_existing_csv(paths.execution_dir / "metrics" / f"{PREFIX}_shift_metrics.csv")
+        existing_predictions = read_existing_csv(paths.execution_dir / "predictions" / f"{PREFIX}_predictions.csv")
+        existing_splits = read_existing_csv(paths.execution_dir / "splits" / f"{PREFIX}_split.csv")
+        completed = existing_run_signatures(existing_shift)
+        total = planned_atomic_count(run_config.models, run_config.seeds, len(conditions), len(SHIFT_SCENARIOS))
         done = 0
         included_sensors = ",".join(EXPECTED_SENSORS)
+        progress = ModelProgressReporter("H2.S4")
         for model_name in run_config.models:
+            model_total = len(effective_seeds_for_model(model_name, run_config.seeds)) * len(conditions) * len(SHIFT_SCENARIOS)
+            progress.start_model(model_name, model_total)
             for feature_group, segment, process_combo in conditions:
                 table = tables[(feature_group, segment, process_combo)]
                 feature_cols = self._feature_columns_for_table(table)
                 sensor_cols = [c for c in feature_cols if "__" in c]
                 process_cols = [c for c in feature_cols if "__" not in c]
                 process_factors = "" if process_combo == "none" else self._process_factors_for_combination(process_combo)
-                for seed in run_config.seeds:
+                for seed in effective_seeds_for_model(model_name, run_config.seeds):
                     for source, target in SHIFT_SCENARIOS:
                         done += 1
+                        child = f"H2S4_{model_name}_{feature_group}_{segment}_{process_combo}_{source}_to_{target}_seed_{seed_label(seed)}"
+                        signature = atomic_signature(
+                            {
+                                "experiment": "H2_S4",
+                                "model": model_name,
+                                "model_params": run_config.model_params.get(model_name, {}),
+                                "feature_group": feature_group,
+                                "segment_setting": segment,
+                                "process_combination": process_combo,
+                                "included_process_factors": process_factors,
+                                "included_sensors": included_sensors,
+                                "sensor_features": sensor_cols,
+                                "process_features": process_cols,
+                                "feature_columns": feature_cols,
+                                "seed": seed,
+                                "source_domain": source,
+                                "target_domain": target,
+                            }
+                        )
+                        if signature in completed:
+                            self.skipped.append({"child_execution_key": child, "run_signature": signature, "model": model_name, "seed": seed, "reason": "existing_result_same_setting"})
+                            progress.step(skipped=True)
+                            continue
                         row, preds, splits = self._run_atomic(
                             helper,
                             model_name,
@@ -394,13 +447,16 @@ class H2S4ProcessInformationExecution:
                             feature_cols,
                             process_cols,
                             run_config,
+                            child,
+                            signature,
                         )
                         shift_rows.append(row)
                         prediction_frames.append(preds)
                         split_frames.append(splits)
+                        progress.step(skipped=False)
                         if done % 500 == 0 or done == total:
                             logger.info(f"H2.S4 progress {done}/{total}")
-        shift_metrics = pd.DataFrame(shift_rows)
+        shift_metrics = concat_existing_new(existing_shift, shift_rows)
         seed_metrics = self._seed_metrics(shift_metrics)
         feature_group_metrics = self._feature_group_metrics(seed_metrics, process_mapping)
         process_metrics = self._process_combination_metrics(feature_group_metrics, process_mapping)
@@ -422,8 +478,8 @@ class H2S4ProcessInformationExecution:
             "process_combination_metrics": process_metrics,
             "process_effect_metrics": process_effect,
             "comparison_metrics": baseline,
-            "predictions": pd.concat(prediction_frames, ignore_index=True),
-            "splits": pd.concat(split_frames, ignore_index=True),
+            "predictions": concat_existing_new(existing_predictions, prediction_frames),
+            "splits": concat_existing_new(existing_splits, split_frames),
             "analysis_summary": None,
             "process_effect_summary": process_effect_summary,
             "process_effect_consistency": process_effect_consistency,
@@ -437,20 +493,20 @@ class H2S4ProcessInformationExecution:
             "metrics_json": metrics_json,
         }
 
-    def _run_atomic(self, helper: S1SegmentExecution, model_name: str, feature_group: str, segment: str, process_combo: str, process_factors: str, sensors: str, sensor_features: str, process_features: str, seed: int, source: str, target: str, table: pd.DataFrame, feature_cols: list[str], process_cols: list[str], run_config: S1RunConfig):
+    def _run_atomic(self, helper: S1SegmentExecution, model_name: str, feature_group: str, segment: str, process_combo: str, process_factors: str, sensors: str, sensor_features: str, process_features: str, seed: int, source: str, target: str, table: pd.DataFrame, feature_cols: list[str], process_cols: list[str], run_config: S1RunConfig, child: str, run_signature: str):
         split = helper._split_frame(table, source, target)
         train = split.loc[split["split"] == "train"]
         test = split.loc[split["split"] == "test"]
-        model = self._model(model_name, seed, run_config, feature_cols, process_cols)
+        model = self._model(model_name, model_seed_value(seed), run_config, feature_cols, process_cols)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model.fit(train[feature_cols], train["VB"])
         y_pred = model.predict(test[feature_cols])
         metrics = helper._metrics(test["VB"].to_numpy(), y_pred)
-        child = f"H2S4_{model_name}_{feature_group}_{segment}_{process_combo}_{source}_to_{target}_seed_{seed}"
         row = {
             "experiment_id": None,
             "child_execution_key": child,
+            "run_signature": run_signature,
             "model": model_name,
             "sensor_setting": SENSOR_SETTING,
             "feature_group": feature_group,
@@ -470,6 +526,7 @@ class H2S4ProcessInformationExecution:
         preds = test[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB"]].copy()
         for col, value in {
             "child_execution_key": child,
+            "run_signature": run_signature,
             "model": model_name,
             "sensor_setting": SENSOR_SETTING,
             "feature_group": feature_group,
@@ -488,6 +545,7 @@ class H2S4ProcessInformationExecution:
         split_out = split[["sample_id", "dataset_run_id", "case", "run", "domain_id", "VB", "split"]].copy()
         for col, value in {
             "child_execution_key": child,
+            "run_signature": run_signature,
             "model": model_name,
             "sensor_setting": SENSOR_SETTING,
             "feature_group": feature_group,
@@ -509,20 +567,9 @@ class H2S4ProcessInformationExecution:
                 ("cat", Pipeline([("imputer", SimpleImputer(strategy="most_frequent")), ("encoder", OneHotEncoder(handle_unknown="ignore"))]), categorical),
             ],
             remainder="drop",
+            sparse_threshold=0.0,
         )
-        if model_name == "random_forest":
-            params = dict(run_config.random_forest_params)
-            params.setdefault("random_state", seed)
-            estimator = RandomForestRegressor(**params)
-        elif model_name == "mlp":
-            params = dict(run_config.mlp_params)
-            params.setdefault("hidden_layer_sizes", (64, 32, 16))
-            params.setdefault("random_state", seed)
-            params.setdefault("max_iter", 300)
-            params.setdefault("learning_rate_init", 0.001)
-            estimator = MLPRegressor(**params)
-        else:
-            raise ValueError(f"Unsupported model: {model_name}")
+        estimator = create_h2_regressor(model_name, seed, run_config.model_params)
         return Pipeline([("preprocess", preprocessor), ("model", estimator)])
 
     def _seed_metrics(self, shift_metrics: pd.DataFrame) -> pd.DataFrame:
@@ -791,7 +838,7 @@ class H2S4ProcessInformationExecution:
     def _metrics_json(self, metrics: pd.DataFrame, best_process: pd.DataFrame, best_segment: pd.DataFrame, r2_summary: pd.DataFrame) -> dict[str, Any]:
         best = metrics.loc[metrics["mean_mae"].idxmin()].to_dict()
         return {
-            "aggregation": "mean_over_6_domain_shifts_then_mean_std_over_seeds",
+            "aggregation": "mean_over_6_leave_one_case_tests_then_mean_std_over_seeds",
             "primary_metric": "mean_mae",
             "best_overall_by_mae": best,
             "all_process_combination_best_by_r2_ratio": float(best_process["is_all_process_combination_best_by_r2"].mean()) if not best_process.empty else 0.0,
@@ -865,7 +912,7 @@ class H2S4ProcessInformationExecution:
             "source_target_overlap_checks": checks,
             "preprocessing_fit_policy": "imputation, encoding, and scaling are fit inside sklearn Pipeline on train split only",
             "feature_leakage_check": "VB/case/domain/sample/dataset_run/split identifiers excluded from feature columns",
-            "process_only_segment_setting": "segment_independent",
+            "process_only_segment_setting": None,
         }
 
     def _analysis_summary(self, results: dict[str, Any], dry_summary: dict[str, Any], run_config: S1RunConfig) -> dict[str, Any]:
@@ -879,7 +926,7 @@ class H2S4ProcessInformationExecution:
             "sensor_setting": SENSOR_SETTING,
             "included_sensors": dry_summary["sensors"],
             "process_combinations": list(PROCESS_COMBINATIONS),
-            "feature_groups": ["sensor_only", "process_only", "sensor_plus_process"],
+            "feature_groups": dry_summary["feature_groups"],
             "segment_settings": SEGMENT_SETTINGS,
             "best_overall_by_mae": results["metrics_json"]["best_overall_by_mae"],
             "all_process_combination_best_by_r2_ratio": results["metrics_json"]["all_process_combination_best_by_r2_ratio"],
@@ -890,19 +937,20 @@ class H2S4ProcessInformationExecution:
 
         figures = paths.execution_dir / "figures"
         effect = results["process_effect_metrics"]
-        fig, ax = plt.subplots(figsize=(10, 5))
-        effect.groupby(["model", "segment_setting"])["delta_r2"].mean().unstack(0).reindex(SEGMENT_SETTINGS).plot(kind="bar", ax=ax)
-        ax.set_ylabel("Delta R2 vs sensor_only")
-        fig.tight_layout()
-        fig.savefig(figures / f"{PREFIX}_process_effect_by_segment.png")
-        plt.close(fig)
+        if not effect.empty and "delta_r2" in effect.columns:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            effect.groupby(["model", "segment_setting"])["delta_r2"].mean().unstack(0).reindex(SEGMENT_SETTINGS).plot(kind="bar", ax=ax)
+            ax.set_ylabel("Delta R2 vs sensor_only")
+            fig.tight_layout()
+            fig.savefig(figures / f"{PREFIX}_process_effect_by_segment.png")
+            plt.close(fig)
 
-        fig, ax = plt.subplots(figsize=(8, 4))
-        effect.groupby("model")["delta_r2"].mean().plot(kind="bar", ax=ax)
-        ax.set_ylabel("Mean delta R2")
-        fig.tight_layout()
-        fig.savefig(figures / f"{PREFIX}_process_effect_by_model.png")
-        plt.close(fig)
+            fig, ax = plt.subplots(figsize=(8, 4))
+            effect.groupby("model")["delta_r2"].mean().plot(kind="bar", ax=ax)
+            ax.set_ylabel("Mean delta R2")
+            fig.tight_layout()
+            fig.savefig(figures / f"{PREFIX}_process_effect_by_model.png")
+            plt.close(fig)
 
         proc = results["process_combination_metrics"]
         order = list(PROCESS_COMBINATIONS)
@@ -959,7 +1007,7 @@ class H2S4ProcessInformationExecution:
 Dry-run completed.
 
 - Cases: {CASE_SCOPE}
-- Domain pairs: {DOMAIN_CASES}
+- Leave-one-case-out cases: {CASE_SCOPE}
 - Sensor setting: {SENSOR_SETTING}
 - Sensors: {dry_summary['sensors']}
 - Process factors: {PROCESS_FACTORS}
@@ -983,8 +1031,9 @@ Dry-run completed.
 
 - Data files: `datasets/processed/mill_process_info_enabled.csv`, `datasets/processed/mill_signal_data_enabled.csv`
 - Cases: {CASE_SCOPE}
-- Domain pairs: {DOMAIN_CASES}
-- Shift scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}
+- Leave-one-case-out cases: {CASE_SCOPE}
+- Cross-test scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}
+- Validation: none
 - Sensor setting: {SENSOR_SETTING}
 - Included sensors: {dry_summary['sensors']}
 - Process factors: A=DoC, B=Feed, C=Material, D=Time
@@ -1035,10 +1084,9 @@ Dry-run completed.
 
 ## RQ Summary
 
-- RQ1/RQ2: Inspect `metrics/H2_S4_process_effect_metrics.csv`; process information helps only where delta R2 is positive or delta MAE/RMSE is negative.
+- RQ1/RQ2: Inspect `metrics/H2_S4_process_combination_metrics.csv` to compare the 15 process-information combinations under fixed all-sensor/all-feature inputs.
 - RQ3: Inspect `analysis/H2_S4_segment_effect_after_process_info.csv` and `analysis/H2_S4_best_segment_by_process_combination.csv`.
 - RQ4: Inspect `analysis/H2_S4_r2_positive_count_summary.csv`.
-- RQ5: Inspect `analysis/H2_S4_process_only_vs_sensor_plus_process.csv`.
 - RQ6: Inspect `analysis/H2_S4_process_factor_contribution.csv`.
 """
         report.write_text(body + paths.report_metadata_markdown(), encoding="utf-8")
@@ -1062,7 +1110,7 @@ Dry-run completed.
             "dataset": "mill_processed_enabled",
             "model": "random_forest,mlp",
             "input_type": "feature-based",
-            "split_strategy": "fixed_case_pair_domain_shift",
+            "split_strategy": "leave_one_case_out_no_validation",
             "steady_cut_mode": "segmentation_no_noload",
             "status": status,
             "best_metric": best_metric,

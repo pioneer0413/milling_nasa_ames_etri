@@ -23,6 +23,12 @@ def minmax_by_group(frame: pd.DataFrame, group_cols: list[str], value_col: str) 
     return frame.groupby(group_cols, dropna=False)[value_col].transform(_scale)
 
 
+def harmonic_mean_columns(frame: pd.DataFrame, columns: list[str], eps: float = 1e-12) -> pd.Series:
+    values = frame[columns].astype(float).clip(lower=0.0)
+    denom = sum(1.0 / (values[col] + eps) for col in columns)
+    return len(columns) / denom
+
+
 def rank_average_report(frame: pd.DataFrame, title: str, score_col: str, rank_col: str) -> str:
     top_rank = frame.sort_values([rank_col, score_col], ascending=[True, False]).head(20)
     top_score = frame.sort_values([score_col, rank_col], ascending=[False, True]).head(20)
@@ -30,7 +36,7 @@ def rank_average_report(frame: pd.DataFrame, title: str, score_col: str, rank_co
 
 ## Rank Definition
 
-Lower rank is better. `mean_rank` is the average rank of each `feature x segment` across the experiment's native comparison units.
+Lower rank is better. `mean_rank` is the average rank of each `feature x sensor x segment` across the experiment's native comparison units.
 
 ## Top By Mean Rank
 
@@ -70,17 +76,16 @@ def process_s1(path: Path) -> dict[str, Any]:
     df = df.loc[df["status"].eq("ok")].copy()
     group_cols = ["case_id", "sensor_name"]
     df["mutual_information_norm"] = minmax_by_group(df, group_cols, "mutual_information")
-    df["feature_segment_score"] = (
-        df["pearson_abs"].astype(float)
-        + df["spearman_abs"].astype(float)
-        + df["mutual_information_norm"].astype(float)
-    ) / 3.0
+    df["feature_segment_score"] = harmonic_mean_columns(
+        df,
+        ["pearson_abs", "spearman_abs", "mutual_information_norm"],
+    )
     df["rank_within_case_sensor"] = df.groupby(group_cols, dropna=False)["feature_segment_score"].rank(ascending=False, method="average")
     df["rank_pearson_within_case_sensor"] = df.groupby(group_cols, dropna=False)["pearson_abs"].rank(ascending=False, method="average")
     df["rank_spearman_within_case_sensor"] = df.groupby(group_cols, dropna=False)["spearman_abs"].rank(ascending=False, method="average")
     df["rank_mi_within_case_sensor"] = df.groupby(group_cols, dropna=False)["mutual_information"].rank(ascending=False, method="average")
     out = (
-        df.groupby(["feature_name", "segment_setting"], dropna=False)
+        df.groupby(["feature_name", "sensor_name", "segment_setting"], dropna=False)
         .agg(
             mean_rank=("rank_within_case_sensor", "mean"),
             median_rank=("rank_within_case_sensor", "median"),
@@ -102,15 +107,18 @@ def process_s1(path: Path) -> dict[str, Any]:
     )
     out["std_rank"] = out["std_rank"].fillna(0.0)
     out["rank_average"] = out[["mean_pearson_rank", "mean_spearman_rank", "mean_mi_rank"]].mean(axis=1)
-    out["overall_rank_by_mean_rank"] = out["mean_rank"].rank(ascending=True, method="first").astype(int)
-    out["overall_rank_by_rank_average"] = out["rank_average"].rank(ascending=True, method="first").astype(int)
-    out = out.sort_values(["overall_rank_by_mean_rank", "overall_rank_by_rank_average"]).reset_index(drop=True)
+    out = out.sort_values(["mean_rank", "mean_score", "rank_average"], ascending=[True, False, True]).reset_index(drop=True)
+    out["overall_rank_by_mean_rank"] = np.arange(1, len(out) + 1)
+    rank_average_order = out.sort_values(["rank_average", "mean_score"], ascending=[True, False]).index
+    rank_average_rank = pd.Series(np.arange(1, len(out) + 1), index=rank_average_order)
+    out["overall_rank_by_rank_average"] = rank_average_rank.reindex(out.index).astype(int).to_numpy()
     output = path / "analysis" / "H1_S1_feature_segment_rank_average.csv"
     out.to_csv(output, index=False)
     report = rank_average_report(
         out[
             [
                 "feature_name",
+                "sensor_name",
                 "segment_setting",
                 "mean_rank",
                 "rank_average",
@@ -121,11 +129,12 @@ def process_s1(path: Path) -> dict[str, Any]:
                 "overall_rank_by_mean_rank",
             ]
         ],
-        "H1_S1 Feature x Segment Association Rank Average",
+        "H1_S1 Feature x Sensor x Segment Association Rank Average",
         "mean_score",
         "mean_rank",
     )
     report += "\n## Source\n\n" + f"- `{source}`\n"
+    report += "\n## Score Method\n\n- `mean_score` is the mean of row-level harmonic mean over `pearson_abs`, `spearman_abs`, and case-sensor min-max normalized mutual information.\n"
     write_report(path / "reports" / "H1_S1_feature_segment_rank_average_report.md", report)
     return {"path": str(output), "top": out.head(10).to_dict(orient="records")}
 
@@ -134,14 +143,23 @@ def process_s2(path: Path) -> dict[str, Any]:
     source = path / "analysis" / "H1_S2_case_level_suitability_results.csv"
     df = pd.read_csv(source)
     df = df.loc[df["calculation_status"].eq("ok")].copy()
+    harmonic_col = "suitability_harmonic" if "suitability_harmonic" in df.columns else "suitability_harmonic_mean"
+    baseline_col = "suitability_baseline" if "suitability_baseline" in df.columns else "suitability_sum_legacy"
     group_cols = ["case_id", "sensor_name"]
-    df["feature_segment_score"] = df["suitability_harmonic_mean"].astype(float)
+    df["feature_segment_score"] = df[harmonic_col].astype(float)
     df["rank_within_case_sensor"] = df.groupby(group_cols, dropna=False)["feature_segment_score"].rank(ascending=False, method="average")
     df["rank_monotonicity_within_case_sensor"] = df.groupby(group_cols, dropna=False)["monotonicity"].rank(ascending=False, method="average")
     df["rank_trendability_within_case_sensor"] = df.groupby(group_cols, dropna=False)["trendability"].rank(ascending=False, method="average")
+    if "prognosability" in df.columns:
+        df["rank_prognosability_within_case_sensor"] = df.groupby(group_cols, dropna=False)["prognosability"].rank(ascending=False, method="average")
+    else:
+        df["prognosability"] = np.nan
+        df["rank_prognosability_within_case_sensor"] = np.nan
+    df["rank_baseline_within_case_sensor"] = df.groupby(group_cols, dropna=False)[baseline_col].rank(ascending=False, method="average")
+    df["rank_harmonic_within_case_sensor"] = df.groupby(group_cols, dropna=False)[harmonic_col].rank(ascending=False, method="average")
     df["rank_sum_legacy_within_case_sensor"] = df.groupby(group_cols, dropna=False)["suitability_sum_legacy"].rank(ascending=False, method="average")
     out = (
-        df.groupby(["feature_name", "feature_group", "segment_setting"], dropna=False)
+        df.groupby(["feature_name", "feature_group", "sensor_name", "sensor_group", "segment_setting"], dropna=False)
         .agg(
             mean_rank=("rank_within_case_sensor", "mean"),
             median_rank=("rank_within_case_sensor", "median"),
@@ -151,10 +169,16 @@ def process_s2(path: Path) -> dict[str, Any]:
             mean_score=("feature_segment_score", "mean"),
             mean_monotonicity=("monotonicity", "mean"),
             mean_trendability=("trendability", "mean"),
+            mean_prognosability=("prognosability", "mean"),
             mean_sum_legacy=("suitability_sum_legacy", "mean"),
+            suitability_baseline=(baseline_col, "mean"),
+            suitability_harmonic=(harmonic_col, "mean"),
             mean_monotonicity_rank=("rank_monotonicity_within_case_sensor", "mean"),
             mean_trendability_rank=("rank_trendability_within_case_sensor", "mean"),
+            mean_prognosability_rank=("rank_prognosability_within_case_sensor", "mean"),
             mean_sum_legacy_rank=("rank_sum_legacy_within_case_sensor", "mean"),
+            mean_baseline_rank=("rank_baseline_within_case_sensor", "mean"),
+            mean_harmonic_rank=("rank_harmonic_within_case_sensor", "mean"),
             rank_count=("rank_within_case_sensor", "size"),
             num_cases=("case_id", "nunique"),
             num_sensors=("sensor_name", "nunique"),
@@ -162,7 +186,15 @@ def process_s2(path: Path) -> dict[str, Any]:
         .reset_index()
     )
     out["std_rank"] = out["std_rank"].fillna(0.0)
-    out["rank_average"] = out[["mean_monotonicity_rank", "mean_trendability_rank", "mean_sum_legacy_rank"]].mean(axis=1)
+    out["rank_average"] = out[
+        [
+            "mean_monotonicity_rank",
+            "mean_trendability_rank",
+            "mean_prognosability_rank",
+            "mean_baseline_rank",
+            "mean_harmonic_rank",
+        ]
+    ].mean(axis=1)
     out["overall_rank_by_mean_rank"] = out["mean_rank"].rank(ascending=True, method="first").astype(int)
     out["overall_rank_by_rank_average"] = out["rank_average"].rank(ascending=True, method="first").astype(int)
     out = out.sort_values(["overall_rank_by_mean_rank", "overall_rank_by_rank_average"]).reset_index(drop=True)
@@ -172,17 +204,20 @@ def process_s2(path: Path) -> dict[str, Any]:
         out[
             [
                 "feature_name",
+                "sensor_name",
                 "segment_setting",
                 "mean_rank",
                 "rank_average",
                 "mean_score",
                 "mean_monotonicity",
                 "mean_trendability",
-                "mean_sum_legacy",
+                "mean_prognosability",
+                "suitability_baseline",
+                "suitability_harmonic",
                 "overall_rank_by_mean_rank",
             ]
         ],
-        "H1_S2 Feature x Segment Suitability Rank Average",
+        "H1_S2 Feature x Sensor x Segment Suitability Rank Average",
         "mean_score",
         "mean_rank",
     )
@@ -200,7 +235,7 @@ def process_s3(path: Path) -> dict[str, Any]:
     df["rank_within_case_sensor"] = df.groupby(group_cols, dropna=False)["feature_segment_score"].rank(ascending=False, method="average")
     df["rank_deviation_within_case_sensor"] = df.groupby(group_cols, dropna=False)["mean_abs_relative_deviation"].rank(ascending=True, method="average")
     out = (
-        df.groupby(["feature_name", "feature_group", "segment_setting"], dropna=False)
+        df.groupby(["feature_name", "feature_group", "sensor_name", "sensor_group", "segment_setting"], dropna=False)
         .agg(
             mean_rank=("rank_within_case_sensor", "mean"),
             median_rank=("rank_within_case_sensor", "median"),
@@ -228,6 +263,7 @@ def process_s3(path: Path) -> dict[str, Any]:
         out[
             [
                 "feature_name",
+                "sensor_name",
                 "segment_setting",
                 "mean_rank",
                 "rank_average",
@@ -237,7 +273,7 @@ def process_s3(path: Path) -> dict[str, Any]:
                 "overall_rank_by_mean_rank",
             ]
         ],
-        "H1_S3 Feature x Segment Robustness Rank Average",
+        "H1_S3 Feature x Sensor x Segment Robustness Rank Average",
         "mean_score",
         "mean_rank",
     )

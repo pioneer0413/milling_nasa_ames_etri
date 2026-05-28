@@ -72,6 +72,7 @@ SENSOR_GROUPS = {
 PRIMARY_SUITABILITY_METHOD = "harmonic_mean"
 COMPUTE_LEGACY_SUM = True
 SUITABILITY_EPSILON = 1e-12
+PROGNOSABILITY_EPSILON = 1e-12
 
 
 def identify_feature_columns(df: pd.DataFrame, target_features: list[str]) -> pd.DataFrame:
@@ -168,35 +169,93 @@ def compute_suitability_sum(monotonicity: float, trendability: float) -> float:
     return float(monotonicity + trendability)
 
 
-def compute_suitability_harmonic(monotonicity: float, trendability: float, epsilon: float = SUITABILITY_EPSILON) -> float:
-    if np.isnan(monotonicity) or np.isnan(trendability):
+def compute_suitability_baseline(monotonicity: float, trendability: float, prognosability: float) -> float:
+    if np.isnan(monotonicity) or np.isnan(trendability) or np.isnan(prognosability):
         return float("nan")
-    denominator = monotonicity + trendability
-    if denominator == 0:
+    return float(monotonicity + trendability + prognosability)
+
+
+def compute_suitability_harmonic(
+    monotonicity: float,
+    trendability: float,
+    prognosability: float,
+    epsilon: float = SUITABILITY_EPSILON,
+) -> float:
+    if np.isnan(monotonicity) or np.isnan(trendability) or np.isnan(prognosability):
+        return float("nan")
+    if monotonicity <= 0 and trendability <= 0 and prognosability <= 0:
         return 0.0
-    return float(2.0 * monotonicity * trendability / (denominator + epsilon))
+    return float(
+        3.0
+        / (
+            (1.0 / (monotonicity + epsilon))
+            + (1.0 / (trendability + epsilon))
+            + (1.0 / (prognosability + epsilon))
+        )
+    )
 
 
-def compute_suitability(monotonicity: float, trendability: float, method: str = PRIMARY_SUITABILITY_METHOD, epsilon: float = SUITABILITY_EPSILON) -> float:
+def compute_suitability(
+    monotonicity: float,
+    trendability: float,
+    prognosability: float,
+    method: str = PRIMARY_SUITABILITY_METHOD,
+    epsilon: float = SUITABILITY_EPSILON,
+) -> float:
     if method == "sum_legacy":
         return compute_suitability_sum(monotonicity, trendability)
+    if method in {"baseline", "additive"}:
+        return compute_suitability_baseline(monotonicity, trendability, prognosability)
     if method == "harmonic_mean":
-        return compute_suitability_harmonic(monotonicity, trendability, epsilon)
+        return compute_suitability_harmonic(monotonicity, trendability, prognosability, epsilon)
     raise ValueError(f"Unknown suitability method: {method}")
 
 
-def compute_sequence_suitability(
-    x: np.ndarray,
-    t: np.ndarray,
-    method: str = PRIMARY_SUITABILITY_METHOD,
+def compute_prognosability(starts: np.ndarray, finals: np.ndarray, epsilon: float = PROGNOSABILITY_EPSILON) -> float:
+    starts = np.asarray(starts, dtype="float64")
+    finals = np.asarray(finals, dtype="float64")
+    finite = np.isfinite(starts) & np.isfinite(finals)
+    starts = starts[finite]
+    finals = finals[finite]
+    if len(finals) == 0:
+        return float("nan")
+    final_variance = float(np.var(finals))
+    mean_start_final_distance = float(np.mean(np.abs(starts - finals)))
+    return float(np.exp(-(final_variance / (mean_start_final_distance + epsilon))))
+
+
+def add_prognosability_and_suitability_scores(
+    case_results: pd.DataFrame,
+    primary_method: str = PRIMARY_SUITABILITY_METHOD,
     epsilon: float = SUITABILITY_EPSILON,
-) -> tuple[float, float, float, float, float]:
-    monotonicity = compute_monotonicity(x)
-    trendability = compute_trendability(x, t)
-    sum_legacy = compute_suitability_sum(monotonicity, trendability)
-    harmonic = compute_suitability_harmonic(monotonicity, trendability, epsilon)
-    primary = compute_suitability(monotonicity, trendability, method, epsilon)
-    return monotonicity, trendability, primary, sum_legacy, harmonic
+) -> pd.DataFrame:
+    out = case_results.copy()
+    out["prognosability"] = np.nan
+    group_cols = ["sensor_name", "feature_name", "segment_setting"]
+    for _, group in out.groupby(group_cols, dropna=False):
+        ok = group.loc[group["calculation_status"].eq("ok")]
+        p = compute_prognosability(ok["x_start"].to_numpy(dtype="float64"), ok["x_final"].to_numpy(dtype="float64"), PROGNOSABILITY_EPSILON)
+        out.loc[group.index, "prognosability"] = p
+
+    out["suitability_mt_legacy"] = out.apply(
+        lambda row: compute_suitability_sum(row["monotonicity"], row["trendability"]),
+        axis=1,
+    )
+    out["suitability_sum_legacy"] = out["suitability_mt_legacy"]
+    out["suitability_baseline"] = out.apply(
+        lambda row: compute_suitability_baseline(row["monotonicity"], row["trendability"], row["prognosability"]),
+        axis=1,
+    )
+    out["suitability_harmonic"] = out.apply(
+        lambda row: compute_suitability_harmonic(row["monotonicity"], row["trendability"], row["prognosability"], epsilon),
+        axis=1,
+    )
+    out["suitability_harmonic_mean"] = out["suitability_harmonic"]
+    out["suitability"] = out.apply(
+        lambda row: compute_suitability(row["monotonicity"], row["trendability"], row["prognosability"], primary_method, epsilon),
+        axis=1,
+    )
+    return out
 
 
 def compute_case_level_suitability(
@@ -220,16 +279,17 @@ def compute_case_level_suitability(
         status = "ok"
         if len(x) < 2:
             status = "skipped_n_less_than_2"
-            monotonicity = trendability = suitability = suitability_sum_legacy = suitability_harmonic_mean = float("nan")
+            monotonicity = trendability = float("nan")
+            x_start = x_final = float("nan")
         else:
-            monotonicity, trendability, suitability, suitability_sum_legacy, suitability_harmonic_mean = compute_sequence_suitability(x, t, primary_method, epsilon)
+            monotonicity = compute_monotonicity(x)
+            trendability = compute_trendability(x, t)
+            x_start = float(x[0])
+            x_final = float(x[-1])
             if not np.isfinite(trendability):
                 status = "skipped_zero_trendability_denominator"
             if not np.isfinite(monotonicity):
                 status = "skipped_monotonicity_not_computable"
-            max_allowed = 2 if primary_method == "sum_legacy" else 1
-            if np.isfinite(suitability) and not (0 <= suitability <= max_allowed):
-                status = "invalid_suitability_range"
         rows.append(
             {
                 "experiment_id": experiment_id,
@@ -241,11 +301,11 @@ def compute_case_level_suitability(
                 "segment_setting": segment_setting,
                 "monotonicity": monotonicity,
                 "trendability": trendability,
-                "suitability": suitability,
-                "suitability_sum_legacy": suitability_sum_legacy,
-                "suitability_harmonic_mean": suitability_harmonic_mean,
+                "x_start": x_start,
+                "x_final": x_final,
                 "primary_suitability_method": primary_method,
                 "suitability_epsilon": epsilon,
+                "prognosability_epsilon": PROGNOSABILITY_EPSILON,
                 "sample_count": int(len(x)),
                 "missing_count": missing,
                 "missing_rate": float(missing / len(group)) if len(group) else float("nan"),
@@ -253,7 +313,16 @@ def compute_case_level_suitability(
                 "calculation_status": status,
             }
         )
-    return pd.DataFrame(rows)
+    out = add_prognosability_and_suitability_scores(pd.DataFrame(rows), primary_method, epsilon)
+    if primary_method == "sum_legacy":
+        max_allowed = 2
+    elif primary_method in {"baseline", "additive"}:
+        max_allowed = 3
+    else:
+        max_allowed = 1
+    invalid = out["suitability"].notna() & ~out["suitability"].between(0, max_allowed)
+    out.loc[invalid, "calculation_status"] = "invalid_suitability_range"
+    return out
 
 
 def aggregate_overall_suitability(case_results: pd.DataFrame) -> pd.DataFrame:
@@ -264,8 +333,12 @@ def aggregate_overall_suitability(case_results: pd.DataFrame) -> pd.DataFrame:
         .agg(
             mean_monotonicity=("monotonicity", "mean"),
             mean_trendability=("trendability", "mean"),
+            mean_prognosability=("prognosability", "mean"),
             mean_suitability=("suitability", "mean"),
+            suitability_mt_legacy=("suitability_mt_legacy", "mean"),
             suitability_sum_legacy=("suitability_sum_legacy", "mean"),
+            suitability_baseline=("suitability_baseline", "mean"),
+            suitability_harmonic=("suitability_harmonic", "mean"),
             suitability_harmonic_mean=("suitability_harmonic_mean", "mean"),
             std_suitability=("suitability", "std"),
             median_suitability=("suitability", "median"),
@@ -293,8 +366,12 @@ def aggregate_pair_level_suitability(case_results: pd.DataFrame, pair_definition
         .agg(
             mean_monotonicity=("monotonicity", "mean"),
             mean_trendability=("trendability", "mean"),
+            mean_prognosability=("prognosability", "mean"),
             mean_suitability=("suitability", "mean"),
+            suitability_mt_legacy=("suitability_mt_legacy", "mean"),
             suitability_sum_legacy=("suitability_sum_legacy", "mean"),
+            suitability_baseline=("suitability_baseline", "mean"),
+            suitability_harmonic=("suitability_harmonic", "mean"),
             suitability_harmonic_mean=("suitability_harmonic_mean", "mean"),
             std_suitability=("suitability", "std"),
             total_sample_count=("sample_count", "sum"),
@@ -304,20 +381,36 @@ def aggregate_pair_level_suitability(case_results: pd.DataFrame, pair_definition
         .reset_index()
     )
     out["std_suitability"] = out["std_suitability"].fillna(0.0)
+    out["rank_by_baseline"] = out.groupby("pair_id")["suitability_baseline"].rank(ascending=False, method="first").astype(int)
+    out["rank_by_harmonic"] = out.groupby("pair_id")["suitability_harmonic"].rank(ascending=False, method="first").astype(int)
     out["rank_by_sum_legacy"] = out.groupby("pair_id")["suitability_sum_legacy"].rank(ascending=False, method="first").astype(int)
     out["rank_by_harmonic_mean"] = out.groupby("pair_id")["suitability_harmonic_mean"].rank(ascending=False, method="first").astype(int)
     primary_method = out["primary_suitability_method"].dropna().iloc[0] if not out["primary_suitability_method"].dropna().empty else PRIMARY_SUITABILITY_METHOD
-    out["rank_by_suitability"] = out["rank_by_sum_legacy"] if primary_method == "sum_legacy" else out["rank_by_harmonic_mean"]
+    if primary_method == "sum_legacy":
+        out["rank_by_suitability"] = out["rank_by_sum_legacy"]
+    elif primary_method in {"baseline", "additive"}:
+        out["rank_by_suitability"] = out["rank_by_baseline"]
+    else:
+        out["rank_by_suitability"] = out["rank_by_harmonic"]
     out = out.sort_values(["pair_id", "rank_by_suitability"], ascending=[True, True]).reset_index(drop=True)
     return out
 
 
 def add_suitability_ranks(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
+    if "suitability_baseline" in out:
+        out["rank_by_baseline"] = out["suitability_baseline"].rank(ascending=False, method="first").astype(int)
+    if "suitability_harmonic" in out:
+        out["rank_by_harmonic"] = out["suitability_harmonic"].rank(ascending=False, method="first").astype(int)
     out["rank_by_sum_legacy"] = out["suitability_sum_legacy"].rank(ascending=False, method="first").astype(int)
     out["rank_by_harmonic_mean"] = out["suitability_harmonic_mean"].rank(ascending=False, method="first").astype(int)
     primary_method = out["primary_suitability_method"].dropna().iloc[0] if "primary_suitability_method" in out and not out["primary_suitability_method"].dropna().empty else PRIMARY_SUITABILITY_METHOD
-    out["rank_by_suitability"] = out["rank_by_sum_legacy"] if primary_method == "sum_legacy" else out["rank_by_harmonic_mean"]
+    if primary_method == "sum_legacy":
+        out["rank_by_suitability"] = out["rank_by_sum_legacy"]
+    elif primary_method in {"baseline", "additive"}:
+        out["rank_by_suitability"] = out["rank_by_baseline"]
+    else:
+        out["rank_by_suitability"] = out["rank_by_harmonic"] if "rank_by_harmonic" in out else out["rank_by_harmonic_mean"]
     return out.sort_values("rank_by_suitability", ascending=True).reset_index(drop=True)
 
 
@@ -345,11 +438,11 @@ def create_suitability_heatmaps(
         label="Suitability harmonic mean",
     )
     _heatmap(
-        feature_segment.pivot_table(index="feature_name", columns="segment_setting", values="suitability_sum_legacy", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
-        "H1_S2 Feature x Segment Suitability Sum Legacy",
-        figure_dir / "H1_S2_feature_segment_suitability_heatmap_sum_legacy.png",
-        vmax=2,
-        label="Suitability sum legacy = M + T",
+        feature_segment.pivot_table(index="feature_name", columns="segment_setting", values="suitability_baseline", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
+        "H1_S2 Feature x Segment Suitability Baseline",
+        figure_dir / "H1_S2_feature_segment_suitability_heatmap_baseline.png",
+        vmax=3,
+        label="Suitability baseline = M + T + P",
     )
     _heatmap(
         method_comparison.assign(rank_change_abs=method_comparison["rank_change_abs"]).pivot_table(index="feature_name", columns="segment_setting", values="rank_change_abs", aggfunc="mean").reindex(index=TARGET_FEATURES, columns=SEGMENT_SETTINGS),
@@ -416,19 +509,19 @@ def create_suitability_heatmaps(
     if sns is not None:
         sns.scatterplot(
             data=feature_segment,
-            x="suitability_sum_legacy",
-            y="suitability_harmonic_mean",
+            x="suitability_baseline",
+            y="suitability_harmonic",
             hue="segment_setting",
             style="feature_group",
             s=80,
         )
     else:
         for segment, group in feature_segment.groupby("segment_setting"):
-            plt.scatter(group["suitability_sum_legacy"], group["suitability_harmonic_mean"], s=60, label=segment, alpha=0.85)
+            plt.scatter(group["suitability_baseline"], group["suitability_harmonic"], s=60, label=segment, alpha=0.85)
         plt.legend(fontsize=8)
-    plt.title("H1_S2 Sum Legacy vs Harmonic Suitability")
-    plt.xlabel("Suitability sum legacy = M + T")
-    plt.ylabel("Suitability harmonic mean")
+    plt.title("H1_S2 Baseline vs Harmonic Suitability")
+    plt.xlabel("Suitability baseline = M + T + P")
+    plt.ylabel("Suitability harmonic = HM(M,T,P)")
     plt.tight_layout()
     plt.savefig(figure_dir / "H1_S2_sum_vs_harmonic_suitability_scatter.png", dpi=180)
     plt.close()
@@ -471,8 +564,8 @@ def write_H1_S2_report(
     report_path = output_dir / "reports" / "H1_S2_report.md"
     top10 = simplified.sort_values("suitability", ascending=False).head(10)
     bottom10 = simplified.sort_values("suitability", ascending=True).head(10)
-    top10_sum = simplified.sort_values("suitability_sum_legacy", ascending=False).head(10)
-    top10_harmonic = simplified.sort_values("suitability_harmonic_mean", ascending=False).head(10)
+    top10_sum = simplified.sort_values("suitability_baseline", ascending=False).head(10)
+    top10_harmonic = simplified.sort_values("suitability_harmonic", ascending=False).head(10)
     top_sum_keys = set(zip(top10_sum["feature"], top10_sum["segment_combination"]))
     top_harmonic_keys = set(zip(top10_harmonic["feature"], top10_harmonic["segment_combination"]))
     robust_common = top10_harmonic.loc[
@@ -480,7 +573,7 @@ def write_H1_S2_report(
     ].head(10)
     method_comparison = suitability_method_comparison(overall)
     rank_change_big = method_comparison.sort_values("rank_change_abs", ascending=False).head(10)
-    sum_high_harmonic_drop = method_comparison.sort_values(["rank_change", "rank_by_sum_legacy"], ascending=[False, True]).head(10)
+    sum_high_harmonic_drop = method_comparison.sort_values(["rank_change", "rank_by_baseline"], ascending=[False, True]).head(10)
     balanced = method_comparison.loc[method_comparison["interpretation"].eq("balanced_high_m_and_t")].head(10)
     steady_best = feature_segment.loc[feature_segment["segment_setting"].eq("steady")].sort_values("mean_suitability", ascending=False).head(5)
     entry_exit_segments = ["entry", "exit", "entry_steady", "entry_exit", "steady_exit"]
@@ -528,17 +621,18 @@ Segment 조합은 framework의 heuristic sequence 기준으로 entry, steady, ex
 
 - Monotonicity: `M = |(N_inc - N_dec) / (n - 1)|`
 - Trendability: feature value `x`와 ordering index `t` 사이 Pearson correlation coefficient의 절댓값
-- Suitability sum legacy: `S_sum = M + T`
-- Suitability harmonic mean: `S_hm = 2 * M * T / (M + T + epsilon)`, epsilon = `{SUITABILITY_EPSILON}`
+	- Prognosability: `P = exp(-var(x_final)/(mean(abs(x_start - x_final)) + epsilon))`
+	- Suitability baseline: `S_baseline = M + T + P`
+	- Suitability harmonic: `S_hm = 3 / (1/(M+epsilon) + 1/(T+epsilon) + 1/(P+epsilon))`, epsilon = `{SUITABILITY_EPSILON}`
 - Primary suitability: `{PRIMARY_SUITABILITY_METHOD}`
 
 Zero difference는 monotonicity의 increase/decrease count에 포함하지 않았습니다. Missing value는 제거했고, 제거 후 `n < 2`이거나 trendability denominator가 0인 조건은 skipped 처리했습니다.
 
 ## Suitability Metric Update
 
-기존 논문식 또는 legacy 방식인 `M + T`도 `suitability_sum_legacy`로 계속 계산했습니다. 다만 본 수정 분석의 primary suitability는 Monotonicity와 Trendability의 균형을 강조하기 위해 harmonic mean인 `suitability_harmonic_mean`으로 설정했습니다.
+	기존 `M + T`는 `suitability_mt_legacy`와 `suitability_sum_legacy`에 참고값으로 유지했습니다. 본 수정 분석의 baseline은 `M + T + P`이며, primary suitability는 `M`, `T`, `P`의 3항 조화평균인 `suitability_harmonic`으로 설정했습니다.
 
-`M + T`는 M 또는 T 중 하나만 높아도 비교적 높은 점수가 될 수 있습니다. 반면 harmonic mean은 M과 T가 모두 높아야 높은 점수를 갖기 때문에 degradation-aware feature를 더 보수적으로 평가합니다. 두 방식의 ranking이 다르면 harmonic mean ranking을 primary로 해석하고, sum legacy ranking은 논문 원식 기준 reference로 해석합니다.
+	`M + T + P`는 세 구성요소의 additive baseline입니다. 반면 harmonic mean은 M, T, P가 모두 높아야 높은 점수를 갖기 때문에 degradation-aware feature를 더 보수적으로 평가합니다. 두 방식의 ranking이 다르면 harmonic ranking을 primary로 해석하고, baseline ranking은 reference로 해석합니다.
 
 ## 6. Preprocessing Choices
 
@@ -562,29 +656,29 @@ Zero difference는 monotonicity의 increase/decrease count에 포함하지 않�
 
 ### Suitability Method Comparison
 
-#### Sum legacy 기준 top 10
+	#### Baseline 기준 top 10
 
-{markdown_table(top10_sum[['feature','segment_combination','monotonicity','trendability','suitability_sum_legacy','suitability_harmonic_mean','rank_by_sum_legacy','rank_by_harmonic_mean']])}
+	{markdown_table(top10_sum[['feature','segment_combination','monotonicity','trendability','prognosability','suitability_baseline','suitability_harmonic','rank_by_baseline','rank_by_harmonic']])}
 
-#### Harmonic mean 기준 top 10
+	#### Harmonic 기준 top 10
 
-{markdown_table(top10_harmonic[['feature','segment_combination','monotonicity','trendability','suitability_sum_legacy','suitability_harmonic_mean','rank_by_sum_legacy','rank_by_harmonic_mean']])}
+	{markdown_table(top10_harmonic[['feature','segment_combination','monotonicity','trendability','prognosability','suitability_baseline','suitability_harmonic','rank_by_baseline','rank_by_harmonic']])}
 
 #### 두 방식에서 공통으로 top에 남은 조합
 
-{markdown_table(robust_common[['feature','segment_combination','suitability_sum_legacy','suitability_harmonic_mean','rank_by_sum_legacy','rank_by_harmonic_mean']])}
+	{markdown_table(robust_common[['feature','segment_combination','suitability_baseline','suitability_harmonic','rank_by_baseline','rank_by_harmonic']])}
 
-#### Sum legacy에서는 높지만 harmonic mean에서 하락한 sensor-level 조합
+	#### Baseline에서는 높지만 harmonic에서 하락한 sensor-level 조합
 
-{markdown_table(sum_high_harmonic_drop[['sensor_name','feature_name','segment_setting','monotonicity','trendability','suitability_sum_legacy','suitability_harmonic_mean','rank_by_sum_legacy','rank_by_harmonic_mean','rank_change']])}
+	{markdown_table(sum_high_harmonic_drop[['sensor_name','feature_name','segment_setting','monotonicity','trendability','prognosability','suitability_baseline','suitability_harmonic','rank_by_baseline','rank_by_harmonic','rank_change']])}
 
 #### Rank 변화가 큰 sensor-level 조합
 
-{markdown_table(rank_change_big[['sensor_name','feature_name','segment_setting','monotonicity','trendability','suitability_sum_legacy','suitability_harmonic_mean','rank_by_sum_legacy','rank_by_harmonic_mean','rank_change_abs','interpretation']])}
+	{markdown_table(rank_change_big[['sensor_name','feature_name','segment_setting','monotonicity','trendability','prognosability','suitability_baseline','suitability_harmonic','rank_by_baseline','rank_by_harmonic','rank_change_abs','interpretation']])}
 
 #### M과 T가 균형 있게 높은 조합
 
-{markdown_table(balanced[['sensor_name','feature_name','segment_setting','monotonicity','trendability','suitability_sum_legacy','suitability_harmonic_mean','rank_by_harmonic_mean']])}
+	{markdown_table(balanced[['sensor_name','feature_name','segment_setting','monotonicity','trendability','prognosability','suitability_baseline','suitability_harmonic','rank_by_harmonic']])}
 
 ## 8. Case-level and Operating-condition-level Results
 
@@ -615,7 +709,7 @@ Steady segment는 안정 절삭 중 load/energy 변화가 누적 wear trend를 �
 
 ## 12. Paper Formula Fidelity
 
-본 H1_S2 분석에서는 Monotonicity와 Trendability는 논문 원식과 동일하게 계산하였다. 또한 논문 원식에 해당하는 M + T 방식의 `suitability_sum_legacy`도 함께 계산하였다. 다만 primary suitability score는 M과 T의 균형을 강조하기 위해 조화평균으로 정의한 `suitability_harmonic_mean`을 사용하였다. 따라서 본 분석은 논문 원식 결과와 modified score 결과를 모두 제공한다.
+본 H1_S2 분석에서는 Monotonicity와 Trendability를 논문 원식과 동일하게 계산하고, case별 start/final feature value로 Prognosability를 추가 계산했다. 논문식 additive baseline은 `suitability_baseline = M + T + P`로 저장했고, primary suitability score는 `M`, `T`, `P`의 3항 조화평균인 `suitability_harmonic`으로 저장했다. 기존 2항 참고값 `M + T`는 `suitability_mt_legacy`와 `suitability_sum_legacy`에 유지했다.
 
 단, 논문과 달리 현재 분석은 NASA Ames milling의 case/run/sensor/segment 구조에 맞춰 case별 sequence에서 먼저 계산한 뒤 평균하는 실무용 적용입니다.
 
@@ -800,8 +894,12 @@ def feature_segment_summary(overall: pd.DataFrame) -> pd.DataFrame:
         .agg(
             mean_monotonicity=("mean_monotonicity", "mean"),
             mean_trendability=("mean_trendability", "mean"),
+            mean_prognosability=("mean_prognosability", "mean"),
             mean_suitability=("mean_suitability", "mean"),
+            suitability_mt_legacy=("suitability_mt_legacy", "mean"),
             suitability_sum_legacy=("suitability_sum_legacy", "mean"),
+            suitability_baseline=("suitability_baseline", "mean"),
+            suitability_harmonic=("suitability_harmonic", "mean"),
             suitability_harmonic_mean=("suitability_harmonic_mean", "mean"),
             std_suitability=("mean_suitability", "std"),
             num_sensors=("sensor_name", "nunique"),
@@ -823,6 +921,7 @@ def simplified_feature_segment_table(summary: pd.DataFrame) -> pd.DataFrame:
             "segment_setting": "segment_combination",
             "mean_monotonicity": "monotonicity",
             "mean_trendability": "trendability",
+            "mean_prognosability": "prognosability",
             "mean_suitability": "suitability",
         }
     )[
@@ -831,11 +930,17 @@ def simplified_feature_segment_table(summary: pd.DataFrame) -> pd.DataFrame:
             "segment_combination",
             "monotonicity",
             "trendability",
+            "prognosability",
             "suitability",
+            "suitability_mt_legacy",
             "suitability_sum_legacy",
+            "suitability_baseline",
+            "suitability_harmonic",
             "suitability_harmonic_mean",
             "primary_suitability_method",
             "suitability_epsilon",
+            "rank_by_baseline",
+            "rank_by_harmonic",
             "rank_by_sum_legacy",
             "rank_by_harmonic_mean",
             "rank_by_suitability",
@@ -882,15 +987,20 @@ def suitability_method_comparison(overall: pd.DataFrame) -> pd.DataFrame:
             "segment_setting",
             "mean_monotonicity",
             "mean_trendability",
+            "mean_prognosability",
+            "suitability_baseline",
+            "suitability_harmonic",
             "suitability_sum_legacy",
             "suitability_harmonic_mean",
+            "rank_by_baseline",
+            "rank_by_harmonic",
             "rank_by_sum_legacy",
             "rank_by_harmonic_mean",
         ]
-    ].rename(columns={"mean_monotonicity": "monotonicity", "mean_trendability": "trendability"}).copy()
-    out["rank_change"] = out["rank_by_harmonic_mean"] - out["rank_by_sum_legacy"]
+    ].rename(columns={"mean_monotonicity": "monotonicity", "mean_trendability": "trendability", "mean_prognosability": "prognosability"}).copy()
+    out["rank_change"] = out["rank_by_harmonic"] - out["rank_by_baseline"]
     out["rank_change_abs"] = out["rank_change"].abs()
-    out["score_gap_sum_minus_harmonic"] = out["suitability_sum_legacy"] - out["suitability_harmonic_mean"]
+    out["score_gap_baseline_minus_harmonic"] = out["suitability_baseline"] - out["suitability_harmonic"]
     mono_q75 = out["monotonicity"].quantile(0.75)
     trend_q75 = out["trendability"].quantile(0.75)
     mono_q25 = out["monotonicity"].quantile(0.25)
@@ -910,7 +1020,7 @@ def suitability_method_comparison(overall: pd.DataFrame) -> pd.DataFrame:
         return "similar_rank_between_methods"
 
     out["interpretation"] = out.apply(interpret, axis=1)
-    return out.sort_values("rank_by_harmonic_mean").reset_index(drop=True)
+    return out.sort_values("rank_by_harmonic").reset_index(drop=True)
 
 
 def case_pair_consistency_summary(case_results: pd.DataFrame) -> dict[str, Any]:
@@ -1060,12 +1170,15 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
                 "primary_suitability_method": PRIMARY_SUITABILITY_METHOD,
                 "compute_legacy_sum": COMPUTE_LEGACY_SUM,
                 "suitability_epsilon": SUITABILITY_EPSILON,
+                "prognosability_epsilon": PROGNOSABILITY_EPSILON,
             },
             "formula": {
                 "monotonicity": "abs((N_inc - N_dec)/(n-1))",
                 "trendability": "abs(Pearson(x,t))",
-                "suitability_sum_legacy": "M + T",
-                "suitability_harmonic_mean": "2*M*T/(M+T+epsilon)",
+                "prognosability": "exp(-var(x_final)/(mean(abs(x_start-x_final))+epsilon))",
+                "suitability_mt_legacy": "M + T",
+                "suitability_baseline": "M + T + P",
+                "suitability_harmonic": "3/(1/(M+epsilon)+1/(T+epsilon)+1/(P+epsilon))",
                 "primary_suitability": PRIMARY_SUITABILITY_METHOD,
             },
             "framework_version": __version__,
@@ -1109,9 +1222,10 @@ def run_analysis(args: argparse.Namespace) -> dict[str, Any]:
             "missing_uncomputable_count": int(case_results["calculation_status"].ne("ok").sum()),
             "primary_suitability_method": PRIMARY_SUITABILITY_METHOD,
             "suitability_epsilon": SUITABILITY_EPSILON,
-            "suitability_in_range": bool(overall["mean_suitability"].between(0, 1).all()) if PRIMARY_SUITABILITY_METHOD == "harmonic_mean" else bool(overall["mean_suitability"].between(0, 2).all()),
+            "suitability_in_range": bool(overall["mean_suitability"].between(0, 1).all()) if PRIMARY_SUITABILITY_METHOD == "harmonic_mean" else bool(overall["mean_suitability"].between(0, 3).all()),
             "suitability_sum_legacy_in_range": bool(overall["suitability_sum_legacy"].between(0, 2).all()),
-            "suitability_harmonic_mean_in_range": bool(overall["suitability_harmonic_mean"].between(0, 1).all()),
+            "suitability_baseline_in_range": bool(overall["suitability_baseline"].between(0, 3).all()),
+            "suitability_harmonic_in_range": bool(overall["suitability_harmonic"].between(0, 1).all()),
         }
         if not validation["feature_definition_all_found"]:
             validation["ok"] = False
