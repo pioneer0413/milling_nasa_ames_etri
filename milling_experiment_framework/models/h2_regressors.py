@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
@@ -19,7 +19,9 @@ from milling_experiment_framework.models.dl.feature_gru_regressor import Feature
 
 H2_MODEL_FAMILIES = {
     "random_forest": "Feature-based ML",
+    "extra_trees": "Feature-based ML",
     "xgboost": "Feature-based ML",
+    "lightgbm": "Feature-based ML",
     "svr": "Feature-based ML",
     "linear_regression": "Feature-based ML",
     "mlp": "Neural Network",
@@ -30,8 +32,16 @@ H2_MODEL_FAMILIES = {
 H2_MODEL_ALIASES = {
     "rf": "random_forest",
     "randomforest": "random_forest",
+    "extra_trees_regressor": "extra_trees",
+    "extratrees": "extra_trees",
+    "extra_tress": "extra_trees",
+    "extra_tress_regressor": "extra_trees",
+    "etr": "extra_trees",
     "xgb": "xgboost",
     "xgb_regressor": "xgboost",
+    "lgbm": "lightgbm",
+    "lgbm_regressor": "lightgbm",
+    "lightgbm_regressor": "lightgbm",
     "support_vector_regression": "svr",
     "linear": "linear_regression",
     "gru": "feature_gru",
@@ -45,6 +55,12 @@ H2_DEFAULT_MODEL_PARAMS: dict[str, dict[str, Any]] = {
         "n_estimators": 100,
         "n_jobs": -1,
     },
+    "extra_trees": {
+        "n_estimators": 300,
+        "max_features": "sqrt",
+        "min_samples_leaf": 1,
+        "n_jobs": -1,
+    },
     "xgboost": {
         "n_estimators": 200,
         "max_depth": 3,
@@ -54,6 +70,16 @@ H2_DEFAULT_MODEL_PARAMS: dict[str, dict[str, Any]] = {
         "objective": "reg:squarederror",
         "tree_method": "hist",
         "n_jobs": -1,
+    },
+    "lightgbm": {
+        "n_estimators": 300,
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "subsample": 0.9,
+        "colsample_bytree": 0.9,
+        "objective": "regression",
+        "n_jobs": -1,
+        "verbosity": -1,
     },
     "svr": {
         "kernel": "rbf",
@@ -246,12 +272,20 @@ def resolve_h2_model_defaults(model_defaults: dict[str, dict[str, Any]] | None =
 def create_h2_regressor(model_name: str, seed: int, model_defaults: dict[str, dict[str, Any]] | None = None):
     name = canonical_model_name(model_name)
     params = resolve_h2_model_params(name, model_defaults)
-    if name in {"random_forest", "xgboost", "mlp", "feature_gru"}:
+    if name in {"random_forest", "extra_trees", "xgboost", "lightgbm", "mlp", "feature_gru"}:
         params.setdefault("random_state", seed)
     if name == "random_forest":
         return RandomForestRegressor(**params)
+    if name == "extra_trees":
+        return ExtraTreesRegressor(**params)
     if name == "xgboost":
         return XGBRegressor(**params)
+    if name == "lightgbm":
+        try:
+            from lightgbm import LGBMRegressor
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError("LightGBM is not installed. Install it with `pip install lightgbm`.") from exc
+        return LGBMRegressor(**params)
     if name == "svr":
         return SVR(**params)
     if name == "linear_regression":
@@ -280,7 +314,9 @@ def h2_model_catalog(model_defaults: dict[str, dict[str, Any]] | None = None) ->
             "family": H2_MODEL_FAMILIES[name],
             "estimator": {
                 "random_forest": "sklearn.ensemble.RandomForestRegressor",
+                "extra_trees": "sklearn.ensemble.ExtraTreesRegressor",
                 "xgboost": "xgboost.XGBRegressor",
+                "lightgbm": "lightgbm.LGBMRegressor",
                 "svr": "sklearn.svm.SVR",
                 "linear_regression": "sklearn.linear_model.LinearRegression",
                 "mlp": "sklearn.neural_network.MLPRegressor",

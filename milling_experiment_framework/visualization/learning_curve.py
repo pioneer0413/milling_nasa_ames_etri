@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from milling_experiment_framework.visualization.figure_export import save_figure_dual
+
 
 def plot_learning_curve(history: pd.DataFrame, path: Path) -> None:
     if history.empty:
@@ -18,5 +20,5 @@ def plot_learning_curve(history: pd.DataFrame, path: Path) -> None:
     ax.set_xlabel("epoch")
     ax.set_ylabel("loss")
     ax.figure.tight_layout()
-    ax.figure.savefig(path)
+    save_figure_dual(ax.figure, path)
     plt.close(ax.figure)

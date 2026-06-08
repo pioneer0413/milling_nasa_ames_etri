@@ -81,25 +81,46 @@ preprocessing:
   target_scaler: none
 
 data:
-  process_info_path: datasets/processed/mill_process_info_enabled.csv
-  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  process_info_path: datasets/processed/mill_process_info.csv
+  signal_data_path: datasets/processed/mill_signal_data.csv
   heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
-  cases: [1, 2, 8, 9, 12, 14]
+  cases: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   expected_sensors: [smcAC, smcDC, vib_spindle, vib_table, AE_spindle, AE_table]
 
 experiment:
-  cases: [1, 2, 8, 9, 12, 14]
+  cases: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   domain_pairs:
-    A: [1, 9]
-    B: [2, 12]
-    C: [8, 14]
+    case_1: [1]
+    case_2: [2]
+    case_3: [3]
+    case_4: [4]
+    case_5: [5]
+    case_7: [7]
+    case_8: [8]
+    case_9: [9]
+    case_10: [10]
+    case_11: [11]
+    case_12: [12]
+    case_13: [13]
+    case_14: [14]
+    case_15: [15]
+    case_16: [16]
   shifts:
-    - [A, B]
-    - [A, C]
-    - [B, A]
-    - [B, C]
-    - [C, A]
-    - [C, B]
+    - [train_without_case_1, case_1]
+    - [train_without_case_2, case_2]
+    - [train_without_case_3, case_3]
+    - [train_without_case_4, case_4]
+    - [train_without_case_5, case_5]
+    - [train_without_case_7, case_7]
+    - [train_without_case_8, case_8]
+    - [train_without_case_9, case_9]
+    - [train_without_case_10, case_10]
+    - [train_without_case_11, case_11]
+    - [train_without_case_12, case_12]
+    - [train_without_case_13, case_13]
+    - [train_without_case_14, case_14]
+    - [train_without_case_15, case_15]
+    - [train_without_case_16, case_16]
   seeds: [0, 1, 2]
 
 protocol:
@@ -114,6 +135,20 @@ protocol:
 runtime:
   modes: [base_only, s_dnn]
   input_representations: [cumulative]
-  shifts: [A_to_B]
+  shifts:
+    - train_without_case_1_to_case_1
+    - train_without_case_2_to_case_2
+    - train_without_case_3_to_case_3
+    - train_without_case_4_to_case_4
+    - train_without_case_5_to_case_5
+    - train_without_case_7_to_case_7
+    - train_without_case_8_to_case_8
+    - train_without_case_9_to_case_9
+    - train_without_case_10_to_case_10
+    - train_without_case_11_to_case_11
+    - train_without_case_12_to_case_12
+    - train_without_case_13_to_case_13
+    - train_without_case_14_to_case_14
+    - train_without_case_15_to_case_15
+    - train_without_case_16_to_case_16
   seeds: [0]
-

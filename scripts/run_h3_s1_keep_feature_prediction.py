@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from milling_experiment_framework.experiments.execution_path import create_execution_dir, find_experiment_dirs
 from milling_experiment_framework.experiments.s1_segment_execution import (
+    CASE_SCOPE,
     DOMAIN_CASES,
     FEATURE_NAMES,
     SHIFT_SCENARIOS,
@@ -288,7 +289,7 @@ def validate_inputs(wide: pd.DataFrame, feature_subsets: dict[str, list[str]]) -
     errors = []
     warnings = []
     leakage_cols = {"VB", "case_id", "domain_id", "pair_id", "source_domain", "target_domain", "split", "dataset_run_id", "sample_id", "run"}
-    if sorted(wide["case_id"].unique().tolist()) != [1, 2, 8, 9, 12, 14]:
+    if sorted(wide["case_id"].unique().tolist()) != CASE_SCOPE:
         errors.append(f"case filtering failed: {sorted(wide['case_id'].unique().tolist())}")
     for name, features in feature_subsets.items():
         if not features:

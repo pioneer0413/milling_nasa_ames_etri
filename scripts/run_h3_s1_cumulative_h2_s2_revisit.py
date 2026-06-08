@@ -30,9 +30,9 @@ from milling_experiment_framework.models.dl.cumulative_descriptor import Cumulat
 
 PREFIX = "H3_S1"
 EXPERIMENT_NAME = "H3_S1_cumulative_descriptor_sensor_combination_H2_S2_revisit"
-CASE_SCOPE = [1, 2, 8, 9, 12, 14]
-DOMAIN_CASES = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
-SHIFT_SCENARIOS = ["A_to_B", "A_to_C", "B_to_A", "B_to_C", "C_to_A", "C_to_B"]
+CASE_SCOPE = h3s3.CASE_SCOPE
+DOMAIN_CASES = h3s3.DOMAIN_CASES
+SHIFT_SCENARIOS = h3s3.SHIFT_SCENARIOS
 SEGMENT_SETTINGS = ["full_length", "steady", "entry", "exit", "entry_steady", "entry_exit", "steady_exit"]
 SENSOR_COMBINATIONS = {
     "current": ["smcAC", "smcDC"],
@@ -49,7 +49,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Revisit H2_S2 with cumulative descriptor S-DNN.")
     parser.add_argument("--config", default="configs/models/cumulative_s_dnn.yaml")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--smoke-grid", action="store_true", help="Run acoustic + entry_exit + A_to_B + seed 0.")
+    parser.add_argument("--smoke-grid", action="store_true", help="Run acoustic + entry_exit + first leave-one-case-out shift + seed 0.")
     parser.add_argument("--sensor-combinations", default=None)
     parser.add_argument("--segments", default=None)
     parser.add_argument("--shifts", default=None)
@@ -156,7 +156,7 @@ def selected_segments(args: argparse.Namespace) -> list[str]:
 
 def selected_shifts(args: argparse.Namespace) -> list[str]:
     if args.smoke_grid:
-        return ["A_to_B"]
+        return [SHIFT_SCENARIOS[0]]
     if args.shifts:
         return [x.strip() for x in args.shifts.split(",") if x.strip()]
     return SHIFT_SCENARIOS

@@ -4,11 +4,11 @@ experiment:
   analysis_type: Exploratory
 
 dataset:
-  name: mill_processed_enabled
-  process_info_path: datasets/processed/mill_process_info_enabled.csv
-  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  name: mill_processed_all_cases_except_case6
+  process_info_path: datasets/processed/mill_process_info.csv
+  signal_data_path: datasets/processed/mill_signal_data.csv
   heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
-  dataset_version: enabled_cases_with_heuristic_segments_v1
+  dataset_version: all_cases_except_case6_with_heuristic_segments_v1
 
 task:
   type: regression

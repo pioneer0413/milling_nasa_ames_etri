@@ -47,6 +47,7 @@ EXPERIMENT_NUMBER = "H4_S4"
 TOPIC = "overlapped_window_random_forest_ensemble_NASA_Ames_main_ABC"
 DOMAIN_CASES = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
 TRANSFER_SCENARIOS = [("A", "B"), ("A", "C"), ("B", "A"), ("B", "C"), ("C", "A"), ("C", "B")]
+DEFAULT_CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 SENSOR_COLUMNS = ["smcAC", "smcDC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"]
 WINDOW_NAMES = ["window_1", "window_2", "window_3", "window_4"]
 MODEL_NAMES = [
@@ -167,14 +168,14 @@ def build_default_config() -> dict[str, Any]:
             "num_seeds": 30,
         },
         "data": {
-            "process_info_path": "datasets/processed/mill_process_info_enabled.csv",
-            "signal_data_path": "datasets/processed/mill_signal_data_enabled.csv",
+            "process_info_path": "datasets/processed/mill_process_info.csv",
+            "signal_data_path": "datasets/processed/mill_signal_data.csv",
             "target_col": "VB",
             "case_col": "case",
             "run_id_col": "run",
             "run_order_col": "run",
             "sensor_columns": SENSOR_COLUMNS,
-            "selected_cases": [1, 2, 8, 9, 12, 14],
+            "selected_cases": DEFAULT_CASE_SCOPE,
         },
         "domain": {"condition_pairs": DOMAIN_CASES, "transfer_scenarios": [f"{s}_to_{t}" for s, t in TRANSFER_SCENARIOS]},
         "split": {"validation_strategy": "source_case_chronological", "validation_ratio": 0.2, "source_only_validation": True},
@@ -228,9 +229,7 @@ def load_data(config: dict[str, Any]) -> WindowRFData:
     target_col = config["data"].get("target_col", "VB")
     sensor_columns = [c for c in config["data"].get("sensor_columns", SENSOR_COLUMNS) if c in signal.columns]
     merged = process.merge(signal, on=["case", "run"], suffixes=("_process", "_signal"))
-    for col in [c for c in merged.columns if c.startswith("enable")]:
-        merged = merged.loc[merged[col].astype(bool)]
-    selected_cases = set(config["data"].get("selected_cases", [1, 2, 8, 9, 12, 14]))
+    selected_cases = set(config["data"].get("selected_cases", DEFAULT_CASE_SCOPE))
     merged = merged.loc[merged["case"].isin(selected_cases)].copy()
     merged = merged.loc[merged[target_col].notna()].copy()
     merged["case_id"] = merged["case"].astype(int)

@@ -9,8 +9,8 @@ experiment:
   num_seeds: 30
 
 data:
-  process_info_path: datasets/processed/mill_process_info_enabled.csv
-  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  process_info_path: datasets/processed/mill_process_info.csv
+  signal_data_path: datasets/processed/mill_signal_data.csv
   target_col: VB
   case_col: case
   run_id_col: run
@@ -22,7 +22,7 @@ data:
     - vib_table
     - AE_spindle
     - AE_table
-  selected_cases: [1, 2, 8, 9, 12, 14]
+  selected_cases: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
 data_augmentation:
   target_interpolation:

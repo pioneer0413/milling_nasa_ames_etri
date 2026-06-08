@@ -47,10 +47,10 @@ preprocessing:
   sequence_length: 512
 
 data:
-  process_info_path: datasets/processed/mill_process_info_enabled.csv
-  signal_data_path: datasets/processed/mill_signal_data_enabled.csv
+  process_info_path: datasets/processed/mill_process_info.csv
+  signal_data_path: datasets/processed/mill_signal_data.csv
   heuristic_sequence_path: datasets/metadata/heuristic_sequence.csv
-  cases: [1, 2, 8, 9, 12, 14]
+  cases: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   expected_sensors: [smcAC, smcDC, vib_spindle, vib_table, AE_spindle, AE_table]
 
 process_information:

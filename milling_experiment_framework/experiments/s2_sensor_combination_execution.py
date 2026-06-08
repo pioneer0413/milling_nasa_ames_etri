@@ -629,7 +629,7 @@ class S2SensorCombinationExecution:
         best = metrics.loc[metrics["mean_mae"].idxmin()].to_dict()
         all_best_ratio = float(best_combo["is_all_sensor_combination_best_by_r2"].mean()) if not best_combo.empty else 0.0
         return {
-            "aggregation": "mean_over_6_leave_one_case_tests_then_mean_std_over_seeds",
+            "aggregation": f"mean_over_{len(CASE_SCOPE)}_leave_one_case_tests_then_mean_std_over_seeds",
             "primary_metric": "mean_mae",
             "best_overall_by_mae": best,
             "all_sensor_combination_best_by_r2_ratio": all_best_ratio,
@@ -800,7 +800,7 @@ Evaluate whether sensor group combinations improve segment-aware VB prediction u
 
 ## Protocol
 
-- Data files: `datasets/processed/mill_process_info_enabled.csv`, `datasets/processed/mill_signal_data_enabled.csv`
+- Data files: `datasets/processed/mill_process_info.csv`, `datasets/processed/mill_signal_data.csv`
 - Cases: {CASE_SCOPE}
 - Leave-one-case-out cases: {CASE_SCOPE}
 - Cross-test scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}

@@ -19,7 +19,9 @@ H2_EXECUTION_ORDER = [
     "linear_regression",
     "svr",
     "random_forest",
+    "extra_trees",
     "xgboost",
+    "lightgbm",
     "mlp",
     "feature_gru",
 ]
@@ -27,7 +29,9 @@ H2_RUNTIME_PER_ATOMIC_SEC = {
     "linear_regression": 0.02,
     "svr": 0.04,
     "random_forest": 0.08,
+    "extra_trees": 0.08,
     "xgboost": 0.10,
+    "lightgbm": 0.10,
     "mlp": 0.15,
     "feature_gru": 0.25,
 }

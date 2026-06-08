@@ -34,9 +34,12 @@ from milling_experiment_framework.models.dl.hybrid_lstm_process import HybridLST
 
 
 PREFIX = "H3_S2"
-CASE_SCOPE = [1, 2, 8, 9, 12, 14]
-DOMAIN_CASES = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
-SHIFT_SCENARIOS = [("A", "B"), ("A", "C"), ("B", "A"), ("B", "C"), ("C", "A"), ("C", "B")]
+CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+EXCLUDED_CASES = [6]
+CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
+TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
+DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
+SHIFT_SCENARIOS = [(f"train_without_case_{case}", f"case_{case}") for case in CASE_SCOPE]
 EXPECTED_SENSORS = ["smcAC", "smcDC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"]
 SENSOR_GROUPS = {
     "current": ["smcAC", "smcDC"],
@@ -229,7 +232,7 @@ def load_config(path: Path) -> dict[str, Any]:
     runtime = config.setdefault("runtime", {})
     runtime.setdefault("segment_modes", [config["model"].get("segment_mode", "entry_exit")])
     runtime.setdefault("process_combinations", [config["model"].get("process_combination", "doc_feed_material_time")])
-    runtime.setdefault("shifts", ["A_to_B"])
+    runtime.setdefault("shifts", [f"{source}_to_{target}" for source, target in SHIFT_SCENARIOS])
     runtime.setdefault("seeds", [0])
     return config
 
@@ -343,8 +346,8 @@ def load_dataset(config: dict[str, Any]) -> pd.DataFrame:
     process = pd.read_csv(data_cfg["process_info_path"])
     signal = pd.read_csv(data_cfg["signal_data_path"])
     heuristic = pd.read_csv(data_cfg["heuristic_sequence_path"])
-    process = process.loc[process["enable"].astype(bool) & process["case"].isin(CASE_SCOPE)].copy()
-    signal = signal.loc[signal["enable"].astype(bool) & signal["case"].isin(CASE_SCOPE)].copy()
+    process = process.loc[process["case"].isin(CASE_SCOPE)].copy()
+    signal = signal.loc[signal["case"].isin(CASE_SCOPE)].copy()
     heuristic = heuristic.loc[heuristic["case"].isin(CASE_SCOPE)].copy()
     data = process.merge(signal, on=["case", "run"], suffixes=("", "_signal"), validate="one_to_one")
     data = data.merge(

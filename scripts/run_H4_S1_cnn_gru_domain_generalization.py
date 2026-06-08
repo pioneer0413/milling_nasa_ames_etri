@@ -61,8 +61,12 @@ from milling_experiment_framework.preprocessing.windowing.run_windowing import w
 
 PREFIX = "H4_S1"
 EXPERIMENT_TOPIC = "cnn_gru_run_sequence_domain_generalization_NASA_Ames"
-DOMAIN_CASES = {"A": [1, 9], "B": [2, 12], "C": [8, 14]}
-TRANSFER_SCENARIOS = [("A", "B"), ("A", "C"), ("B", "A"), ("B", "C"), ("C", "A"), ("C", "B")]
+DEFAULT_CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+EXCLUDED_CASES = [6]
+CASE_DOMAINS = {f"case_{case}": [case] for case in DEFAULT_CASE_SCOPE}
+TRAIN_CASE_GROUPS = {f"not_{case}": [other for other in DEFAULT_CASE_SCOPE if other != case] for case in DEFAULT_CASE_SCOPE}
+DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
+TRANSFER_SCENARIOS = [(f"not_{case}", f"case_{case}") for case in DEFAULT_CASE_SCOPE]
 SENSOR_COLUMNS = ["smcAC", "smcDC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"]
 FEATURE_NAMES = ["mean", "std", "max", "min", "peak_to_peak", "kurtosis", "skewness", "spectral_centroid", "band_energy"]
 DL_MODELS = ["cnn_only", "cnn_lag_concat", "cnn_gru", "cnn1d_only", "feature_gru", "hybrid_lstm_process"]
@@ -141,8 +145,8 @@ def resample_1d(x: np.ndarray, target_len: int) -> np.ndarray:
     return np.interp(new, old, x).astype(np.float32)
 
 
-def domain_for_case(case_id: int) -> str:
-    for domain, cases in DOMAIN_CASES.items():
+def domain_for_case(case_id: int, domain_cases: dict[str, list[int]] | None = None) -> str:
+    for domain, cases in (domain_cases or DOMAIN_CASES).items():
         if int(case_id) in cases:
             return domain
     return "unknown"
@@ -218,13 +222,10 @@ def load_run_data(config: dict[str, Any], sequence_length: int) -> RunData:
     signal_path = Path(config["data"]["signal_data_path"])
     process = pd.read_csv(process_path)
     signal = pd.read_csv(signal_path)
-    selected_cases = set(config["data"].get("selected_cases", [1, 2, 8, 9, 12, 14]))
+    selected_cases = set(config["data"].get("selected_cases", DEFAULT_CASE_SCOPE))
     target_col = config["data"].get("target_col", "VB")
     sensor_columns = [c for c in config["data"].get("sensor_columns", SENSOR_COLUMNS) if c in signal.columns]
     merged = process.merge(signal, on=["case", "run"], suffixes=("_process", "_signal"))
-    enable_cols = [c for c in merged.columns if c.startswith("enable")]
-    for col in enable_cols:
-        merged = merged.loc[merged[col].astype(bool)]
     merged = merged.loc[merged["case"].isin(selected_cases)].copy()
     merged["case_id"] = merged["case"].astype(int)
     merged["run_id"] = merged["run"].astype(int)
@@ -243,7 +244,8 @@ def load_run_data(config: dict[str, Any], sequence_length: int) -> RunData:
         merged = merged.loc[merged[target_col].notna()].copy()
     
     merged["dataset_run_id"] = merged["case_id"].astype(str) + "_" + merged["run_id"].astype(str)
-    merged["domain_id"] = merged["case_id"].map(domain_for_case)
+    configured_domains = domain_cases_from_config(config)
+    merged["domain_id"] = merged["case_id"].map(lambda case_id: domain_for_case(int(case_id), configured_domains))
     merged = merged.reset_index(drop=True)
     merged["sample_index"] = np.arange(len(merged))
 
@@ -541,11 +543,21 @@ def split_train_test_only(meta: pd.DataFrame, source_cases: list[int], target_ca
 
 
 def domain_cases_from_config(config: dict[str, Any]) -> dict[str, list[int]]:
-    configured = config.get("domain", {}).get("domain_pairs", DOMAIN_CASES)
+    split_strategy = str(config.get("split", {}).get("validation_strategy", "")).lower()
+    if split_strategy == "leave_one_case_out":
+        cases = [int(case_id) for case_id in config.get("data", {}).get("selected_cases", DEFAULT_CASE_SCOPE)]
+        case_domains = {f"case_{case}": [case] for case in cases}
+        train_groups = {f"not_{case}": [other for other in cases if other != case] for case in cases}
+        return {**case_domains, **train_groups}
+    configured = config.get("domain", {}).get("domain_pairs") or DOMAIN_CASES
     return {str(domain): [int(case_id) for case_id in cases] for domain, cases in configured.items()}
 
 
 def transfer_scenarios_from_config(config: dict[str, Any]) -> list[tuple[str, str]]:
+    split_strategy = str(config.get("split", {}).get("validation_strategy", "")).lower()
+    if split_strategy == "leave_one_case_out":
+        cases = [int(case_id) for case_id in config.get("data", {}).get("selected_cases", DEFAULT_CASE_SCOPE)]
+        return [(f"not_{case}", f"case_{case}") for case in cases]
     configured = config.get("domain", {}).get("transfer_scenarios")
     if not configured:
         return TRANSFER_SCENARIOS
@@ -1478,17 +1490,17 @@ def build_default_config() -> dict[str, Any]:
             "num_seeds": 30,
         },
         "data": {
-            "process_info_path": "datasets/processed/mill_process_info_enabled.csv",
-            "signal_data_path": "datasets/processed/mill_signal_data_enabled.csv",
+            "process_info_path": "datasets/processed/mill_process_info.csv",
+            "signal_data_path": "datasets/processed/mill_signal_data.csv",
             "target_col": "VB",
             "case_col": "case",
             "run_id_col": "run",
             "run_order_col": "run",
             "sensor_columns": SENSOR_COLUMNS,
-            "selected_cases": [1, 2, 8, 9, 12, 14],
+            "selected_cases": DEFAULT_CASE_SCOPE,
         },
         "domain": {"domain_pairs": DOMAIN_CASES, "transfer_scenarios": TRANSFER_SCENARIOS},
-        "split": {"validation_strategy": "source_case_chronological_tail", "validation_ratio": 0.2, "source_only_validation": True},
+        "split": {"validation_strategy": "leave_one_case_out", "validation_ratio": 0.0, "source_only_validation": False},
         "sequence": {"sequence_size": 3, "stride": 1, "padding": "left", "padding_value": 0.0, "allow_cross_case_sequence": False, "segment_setting": "full_length", "sequence_length": 256},
         "models": {
             "feature_ridge": {"enabled": True},
@@ -1579,7 +1591,7 @@ def build_default_config() -> dict[str, Any]:
         },
         "normalization": {"method": "zscore", "fit_scope": "source_train_only", "apply_per_sensor": True},
         "training": {"optimizer": "adam", "learning_rate": 0.0005, "batch_size": 8, "max_epochs": 200, "early_stopping": {"enabled": True, "patience": 100, "monitor": "val_RMSE", "mode": "min"}, "checkpoint": {"enabled": True, "save_best": True, "save_last": True}, "primary_metric": "RMSE"},
-        "smoke": {"enabled": True, "scenario": "A_to_B", "seed": 0, "models": ["feature_gru"], "max_epochs": 2, "batch_size": 4, "sequence_length": 128, "window_length": 300, "num_windows": 5},
+        "smoke": {"enabled": True, "scenario": "not_1_to_case_1", "seed": 0, "models": ["feature_gru"], "max_epochs": 2, "batch_size": 4, "sequence_length": 128, "window_length": 300, "num_windows": 5},
         "evaluation": {"metrics": ["MAE", "RMSE", "R2"], "aggregate_by_case": True, "aggregate_by_target_domain": True},
         "visualization": {
             "rmse_filter_enabled": True,
@@ -1930,12 +1942,15 @@ def run_numeric_debug_diagnostics(data: RunData, config: dict[str, Any], output_
 def write_analysis_and_figures(
     data: RunData,
     output_dir: Path,
+    config: dict[str, Any],
     case_metrics: pd.DataFrame,
     domain_metrics: pd.DataFrame,
     shift_metrics: pd.DataFrame,
     model_comparison: pd.DataFrame,
     predictions: pd.DataFrame,
 ) -> dict[str, Any]:
+    domain_cases = domain_cases_from_config(config)
+    scenario_pairs = transfer_scenarios_from_config(config)
     case_summary_rows = []
     for case_id, group in data.meta.groupby("case_id"):
         idx = group.index.to_numpy()
@@ -1943,7 +1958,7 @@ def write_analysis_and_figures(
         case_summary_rows.append(
             {
                 "case_id": int(case_id),
-                "domain_id": domain_for_case(int(case_id)),
+                "domain_id": domain_for_case(int(case_id), domain_cases),
                 "num_runs": int(len(group)),
                 "VB_mean": float(group["VB"].mean()),
                 "VB_std": float(group["VB"].std()),
@@ -1957,9 +1972,9 @@ def write_analysis_and_figures(
     case_dist.to_csv(output_dir / "analysis" / f"{PREFIX}_case_distribution_summary.csv", index=False)
 
     domain_shift_rows = []
-    for source, target in TRANSFER_SCENARIOS:
-        source_idx = data.meta.index[data.meta["case_id"].isin(DOMAIN_CASES[source])].to_numpy()
-        target_idx = data.meta.index[data.meta["case_id"].isin(DOMAIN_CASES[target])].to_numpy()
+    for source, target in scenario_pairs:
+        source_idx = data.meta.index[data.meta["case_id"].isin(domain_cases[source])].to_numpy()
+        target_idx = data.meta.index[data.meta["case_id"].isin(domain_cases[target])].to_numpy()
         source_features = data.feature_matrix[source_idx]
         target_features = data.feature_matrix[target_idx]
         domain_shift_rows.append(
@@ -1967,8 +1982,8 @@ def write_analysis_and_figures(
                 "scenario_name": f"{source}_to_{target}",
                 "source_domain": source,
                 "target_domain": target,
-                "source_cases": ",".join(map(str, DOMAIN_CASES[source])),
-                "target_cases": ",".join(map(str, DOMAIN_CASES[target])),
+                "source_cases": ",".join(map(str, domain_cases[source])),
+                "target_cases": ",".join(map(str, domain_cases[target])),
                 "source_VB_mean": float(data.meta.loc[source_idx, "VB"].mean()),
                 "target_VB_mean": float(data.meta.loc[target_idx, "VB"].mean()),
                 "delta_VB_mean_target_minus_source": float(data.meta.loc[target_idx, "VB"].mean() - data.meta.loc[source_idx, "VB"].mean()),
@@ -2708,7 +2723,7 @@ def main() -> None:
     write_json(output_dir / "splits" / f"{PREFIX}_split_summary.json", split_summary)
     leak = leakage_check(splits, config)
     write_json(output_dir / "splits" / f"{PREFIX}_leakage_check.json", leak)
-    analysis_summary = write_analysis_and_figures(data, output_dir, case_metrics, domain_metrics, shift_metrics, model_comparison, predictions)
+    analysis_summary = write_analysis_and_figures(data, output_dir, config, case_metrics, domain_metrics, shift_metrics, model_comparison, predictions)
     make_learning_history_figures(output_dir, learning_history)
     effect_summary = pd.read_csv(output_dir / "analysis" / f"{PREFIX}_run_sequence_effect_summary.csv")
     write_report(output_dir, config, leak, smoke_result, model_comparison, effect_summary, analysis_summary)

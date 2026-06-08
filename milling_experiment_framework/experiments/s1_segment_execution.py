@@ -43,7 +43,8 @@ from milling_experiment_framework.utils.io import write_csv, write_json, write_y
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
 
-CASE_SCOPE = [1, 2, 8, 9, 12, 14]
+CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+EXCLUDED_CASES = [6]
 CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
 TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
 DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
@@ -229,8 +230,8 @@ class S1SegmentExecution:
         process = pd.read_csv(run_config.process_info_path)
         signal = pd.read_csv(run_config.signal_data_path)
         heuristic = pd.read_csv(run_config.heuristic_sequence_path)
-        process = process.loc[process["enable"].astype(bool) & process["case"].isin(CASE_SCOPE)].copy()
-        signal = signal.loc[signal["enable"].astype(bool) & signal["case"].isin(CASE_SCOPE)].copy()
+        process = process.loc[process["case"].isin(CASE_SCOPE)].copy()
+        signal = signal.loc[signal["case"].isin(CASE_SCOPE)].copy()
         heuristic = heuristic.loc[heuristic["case"].isin(CASE_SCOPE)].copy()
         data = process.merge(signal, on=["case", "run"], suffixes=("", "_signal"), validate="one_to_one")
         data = data.merge(
@@ -692,7 +693,7 @@ class S1SegmentExecution:
     def _metrics_json(self, segment_metrics: pd.DataFrame) -> dict[str, Any]:
         best = segment_metrics.loc[segment_metrics["mean_mae"].idxmin()].to_dict()
         return {
-            "aggregation": "mean_over_6_leave_one_case_tests_then_mean_std_over_seeds",
+            "aggregation": f"mean_over_{len(CASE_SCOPE)}_leave_one_case_tests_then_mean_std_over_seeds",
             "shift_scenarios": [f"{source}_to_{target}" for source, target in SHIFT_SCENARIOS],
             "primary_metric": "mean_mae",
             "best_overall_by_mae": best,
@@ -878,8 +879,8 @@ Dry-run completed.
 
 ## Data
 
-- Process info: `datasets/processed/mill_process_info_enabled.csv`
-- Signal data: `datasets/processed/mill_signal_data_enabled.csv`
+- Process info: `datasets/processed/mill_process_info.csv`
+- Signal data: `datasets/processed/mill_signal_data.csv`
 - Heuristic sequence: `datasets/metadata/heuristic_sequence.csv`
 - Cases: {CASE_SCOPE}
 - Leave-one-case-out cases: {CASE_SCOPE}
@@ -903,7 +904,7 @@ Evaluate whether segment setting changes VB prediction performance and whether a
 
 ## Data and Protocol
 
-- Data files: `datasets/processed/mill_process_info_enabled.csv`, `datasets/processed/mill_signal_data_enabled.csv`
+- Data files: `datasets/processed/mill_process_info.csv`, `datasets/processed/mill_signal_data.csv`
 - Cases: {CASE_SCOPE}
 - Leave-one-case-out cases: {CASE_SCOPE}
 - Cross-test scenarios: {[f'{s}_to_{t}' for s, t in SHIFT_SCENARIOS]}

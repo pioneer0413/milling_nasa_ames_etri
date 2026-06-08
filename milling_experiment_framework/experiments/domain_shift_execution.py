@@ -21,26 +21,18 @@ from milling_experiment_framework.utils.io import write_csv, write_json, write_y
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
 
-CASE_SCOPE = [1, 2, 8, 9, 12, 14]
-DOMAIN_CASES = {
-    "A": [1, 9],
-    "B": [2, 12],
-    "C": [8, 14],
-}
-SHIFT_SCENARIOS = [
-    ("A", "B"),
-    ("A", "C"),
-    ("B", "A"),
-    ("B", "C"),
-    ("C", "A"),
-    ("C", "B"),
-]
+CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+EXCLUDED_CASES = [6]
+CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
+TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
+DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
+SHIFT_SCENARIOS = [(f"train_without_case_{case}", f"case_{case}") for case in CASE_SCOPE]
 SIGNAL_COLUMNS = ["smcAC", "smcDC", "vib_table", "vib_spindle", "AE_table", "AE_spindle"]
 PROCESS_FEATURES = ["time", "DOC", "feed", "material"]
 
 
 class DomainShiftExecution:
-    """Run the fixed A/B/C case-pair domain-shift protocol from docs/usage/cli.md."""
+    """Run leave-one-case-out domain-shift evaluation over the default milling case scope."""
 
     def __init__(self, config_path: str | Path, root: str | Path = "."):
         self.config_path = Path(config_path)
@@ -120,7 +112,7 @@ class DomainShiftExecution:
                 "seed": config["experiment"].get("seed"),
                 "config_hash": config.get("config_hash"),
                 "framework_version": config.get("framework_version"),
-                "protocol": "fixed_case_pair_domain_shift",
+                "protocol": "leave_one_case_out_domain_shift",
                 "case_scope": CASE_SCOPE,
                 "domain_cases": DOMAIN_CASES,
                 "shift_scenarios": [f"{s}_to_{t}" for s, t in SHIFT_SCENARIOS],
@@ -147,8 +139,8 @@ class DomainShiftExecution:
         signal_path = Path(config["dataset"]["signal_data_path"])
         process = pd.read_csv(process_path)
         signal = pd.read_csv(signal_path)
-        process = process.loc[process["enable"].astype(bool) & process["case"].isin(CASE_SCOPE)].copy()
-        signal = signal.loc[signal["enable"].astype(bool) & signal["case"].isin(CASE_SCOPE)].copy()
+        process = process.loc[process["case"].isin(CASE_SCOPE)].copy()
+        signal = signal.loc[signal["case"].isin(CASE_SCOPE)].copy()
         data = process.merge(signal, on=["case", "run"], suffixes=("", "_signal"), validate="one_to_one")
         data = data.loc[data["VB"].notna()].reset_index(drop=True)
         feature_rows = []
@@ -286,7 +278,7 @@ class DomainShiftExecution:
             }
         final_metrics = shift_metrics.groupby("metric_name")["metric_value"].mean().to_dict()
         return {
-            "aggregation": "mean_over_6_domain_shifts",
+            "aggregation": f"mean_over_{len(CASE_SCOPE)}_leave_one_case_domain_shifts",
             "shift_scenarios": scenarios,
             "final_metrics": {key: float(value) for key, value in final_metrics.items()},
         }
@@ -297,7 +289,7 @@ class DomainShiftExecution:
             "dataset": config["dataset"]["name"],
             "model": config["model"]["name"],
             "input_type": config["model"]["input_type"],
-            "split_strategy": "fixed_case_pair_domain_shift",
+            "split_strategy": "leave_one_case_out_domain_shift",
             "steady_cut_mode": config.get("steady_cut_mode", "full_signal"),
             "aggregation": metrics_json["aggregation"],
         }
@@ -352,7 +344,7 @@ class DomainShiftExecution:
             "dataset": config["dataset"].get("name"),
             "model": config["model"].get("name"),
             "input_type": config["model"].get("input_type"),
-            "split_strategy": "fixed_case_pair_domain_shift",
+            "split_strategy": "leave_one_case_out_domain_shift",
             "steady_cut_mode": config.get("steady_cut_mode", "full_signal"),
             "status": status,
             "best_metric": metrics_json.get("final_metrics", {}).get("mae"),
