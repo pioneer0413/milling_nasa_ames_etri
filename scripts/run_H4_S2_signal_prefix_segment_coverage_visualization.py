@@ -29,7 +29,7 @@ from milling_experiment_framework.experiment_logging.environment import collect_
 from milling_experiment_framework.visualization.figure_export import save_figure_dual
 
 
-PREFIX = "H6_S2"
+PREFIX = "H4_S2"
 TOPIC = "signal_prefix_segment_coverage_visualization"
 DEFAULT_METADATA_PATH = "datasets/metadata/heuristic_sequence_peng2026.csv"
 DEFAULT_PREFIX_PERCENTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
@@ -53,7 +53,7 @@ STATUS_COLORS = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H6_S2 signal-prefix segment coverage visualization.")
+    parser = argparse.ArgumentParser(description="Run H4_S2 signal-prefix segment coverage visualization.")
     parser.add_argument("--metadata-path", default=DEFAULT_METADATA_PATH)
     parser.add_argument("--case-scope", type=int, nargs="+", default=None)
     parser.add_argument("--prefix-percents", type=float, nargs="+", default=DEFAULT_PREFIX_PERCENTS)
@@ -105,7 +105,7 @@ def resolve(path: str | Path) -> Path:
 
 
 def execution_dir(output_root: Path, timestamp: str) -> Path:
-    return output_root / "H6" / "S2" / f"{timestamp}_{TOPIC}"
+    return output_root / "H4" / "S2" / f"{timestamp}_{TOPIC}"
 
 
 def make_dirs(output_dir: Path) -> None:
@@ -156,11 +156,11 @@ def build_config(args: argparse.Namespace, timestamp: str, output_dir: Path) -> 
             "start_idx": 0,
         },
         "outputs": {
-            "coverage_long": "data/H6_S2_prefix_segment_coverage_long.csv",
-            "coverage_summary": "analysis/H6_S2_segment_coverage_summary.csv",
-            "dominant_segments": "analysis/H6_S2_dominant_segments.csv",
-            "heatmap": "figures/H6_S2_prefix_segment_mean_inclusion_heatmap.{png,svg}",
-            "stacked_bar": "figures/H6_S2_prefix_segment_status_stacked_bar.{png,svg}",
+            "coverage_long": "data/H4_S2_prefix_segment_coverage_long.csv",
+            "coverage_summary": "analysis/H4_S2_segment_coverage_summary.csv",
+            "dominant_segments": "analysis/H4_S2_dominant_segments.csv",
+            "heatmap": "figures/H4_S2_prefix_segment_mean_inclusion_heatmap.{png,svg}",
+            "stacked_bar": "figures/H4_S2_prefix_segment_status_stacked_bar.{png,svg}",
         },
     }
 
@@ -333,7 +333,7 @@ def plot_heatmap(output_dir: Path, summary: pd.DataFrame, dpi: int) -> Path:
     cbar = fig.colorbar(image, ax=ax, shrink=0.88)
     cbar.set_label("Mean inclusion ratio")
     fig.tight_layout()
-    path = output_dir / "figures" / "H6_S2_prefix_segment_mean_inclusion_heatmap.png"
+    path = output_dir / "figures" / "H4_S2_prefix_segment_mean_inclusion_heatmap.png"
     save_figure_dual(fig, path, dpi=dpi)
     plt.close(fig)
     return path
@@ -390,7 +390,7 @@ def plot_status_stacked_bar(output_dir: Path, summary: pd.DataFrame, dpi: int) -
         title="Coverage status",
     )
     fig.tight_layout(rect=(0, 0, 1, 0.86))
-    path = output_dir / "figures" / "H6_S2_prefix_segment_status_stacked_bar.png"
+    path = output_dir / "figures" / "H4_S2_prefix_segment_status_stacked_bar.png"
     save_figure_dual(fig, path, dpi=dpi)
     plt.close(fig)
     return path
@@ -411,11 +411,11 @@ def write_report(output_dir: Path, summary: dict[str, Any], dominant: pd.DataFra
         "",
         "## Outputs",
         "",
-        "- Coverage long table: `data/H6_S2_prefix_segment_coverage_long.csv`",
-        "- Aggregated coverage summary: `analysis/H6_S2_segment_coverage_summary.csv`",
-        "- Dominant segment interpretation: `analysis/H6_S2_dominant_segments.csv`",
-        "- Heatmap: `figures/H6_S2_prefix_segment_mean_inclusion_heatmap.{png,svg}`",
-        "- Stacked bar chart: `figures/H6_S2_prefix_segment_status_stacked_bar.{png,svg}`",
+        "- Coverage long table: `data/H4_S2_prefix_segment_coverage_long.csv`",
+        "- Aggregated coverage summary: `analysis/H4_S2_segment_coverage_summary.csv`",
+        "- Dominant segment interpretation: `analysis/H4_S2_dominant_segments.csv`",
+        "- Heatmap: `figures/H4_S2_prefix_segment_mean_inclusion_heatmap.{png,svg}`",
+        "- Stacked bar chart: `figures/H4_S2_prefix_segment_status_stacked_bar.{png,svg}`",
         "",
         "## Interpretation By Prefix",
         "",
@@ -427,7 +427,7 @@ def write_report(output_dir: Path, summary: dict[str, Any], dominant: pd.DataFra
             f"| {row.signal_prefix_percent:g} | {row.dominant_by_mean_inclusion} | "
             f"{row.dominant_by_full_rate} | {row.interpretation} |"
         )
-    (output_dir / "reports" / "H6_S2_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (output_dir / "reports" / "H4_S2_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -440,8 +440,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     log_progress(f"Using execution directory: {output_dir}")
 
     config = build_config(args, timestamp, output_dir)
-    write_yaml(output_dir / "configs" / "H6_S2_input_config.yaml", config)
-    write_json(output_dir / "logs" / "H6_S2_environment.json", collect_environment())
+    write_yaml(output_dir / "configs" / "H4_S2_input_config.yaml", config)
+    write_json(output_dir / "logs" / "H4_S2_environment.json", collect_environment())
 
     log_progress("Loading run segment boundary metadata.")
     metadata = load_metadata(args)
@@ -450,9 +450,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     coverage_summary = aggregate_coverage(coverage)
     dominant = build_dominant_segments(coverage_summary)
 
-    coverage.to_csv(output_dir / "data" / "H6_S2_prefix_segment_coverage_long.csv", index=False)
-    coverage_summary.to_csv(output_dir / "analysis" / "H6_S2_segment_coverage_summary.csv", index=False)
-    dominant.to_csv(output_dir / "analysis" / "H6_S2_dominant_segments.csv", index=False)
+    coverage.to_csv(output_dir / "data" / "H4_S2_prefix_segment_coverage_long.csv", index=False)
+    coverage_summary.to_csv(output_dir / "analysis" / "H4_S2_segment_coverage_summary.csv", index=False)
+    dominant.to_csv(output_dir / "analysis" / "H4_S2_dominant_segments.csv", index=False)
 
     log_progress("Rendering heatmap and stacked bar figures.")
     heatmap_path = plot_heatmap(output_dir, coverage_summary, args.dpi)
@@ -472,7 +472,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "heatmap_path": str(heatmap_path.relative_to(output_dir)),
         "stacked_bar_path": str(stacked_path.relative_to(output_dir)),
     }
-    write_json(output_dir / "analysis" / "H6_S2_summary.json", summary)
+    write_json(output_dir / "analysis" / "H4_S2_summary.json", summary)
     write_report(output_dir, summary, dominant)
     log_progress("Completed.")
     return summary
@@ -486,7 +486,7 @@ def main() -> None:
         print(json.dumps(to_builtin(summary), indent=2, ensure_ascii=False))
     except Exception:
         if output_dir is not None:
-            (output_dir / "logs" / "H6_S2_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (output_dir / "logs" / "H4_S2_error.log").write_text(traceback.format_exc(), encoding="utf-8")
         raise
 
 

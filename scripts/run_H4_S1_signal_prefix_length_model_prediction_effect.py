@@ -48,7 +48,7 @@ from milling_experiment_framework.preprocessing.vb_common import COMMON_VB_PREPR
 from milling_experiment_framework.visualization.figure_export import save_figure_dual
 
 
-PREFIX = "H6_S1"
+PREFIX = "H4_S1"
 TOPIC = "signal_prefix_length_model_prediction_effect"
 DEFAULT_CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 DEFAULT_SENSORS = ["smcDC", "smcAC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"] #
@@ -69,7 +69,7 @@ STACKING_MODEL_ALIASES = {
     "stacking_ensemble": STACKING_MODEL_NAME,
     "stacking-ensemble": STACKING_MODEL_NAME,
 }
-H6_MODEL_ORDER = [
+H4_MODEL_ORDER = [
     "linear_regression",
     "svr",
     "random_forest",
@@ -95,14 +95,14 @@ DEFAULT_FEATURES = [
     "spectral_centroid",
     "band_energy",
 ]
-SIGNATURE_FILE = "H6_S1_resume_signature.json"
-PROGRESS_FILE = "H6_S1_progress_state.json"
+SIGNATURE_FILE = "H4_S1_resume_signature.json"
+PROGRESS_FILE = "H4_S1_progress_state.json"
 DEFAULT_MAX_SIGNAL_ABS = 1_000_000.0
 FEATURE_CLIP_ABS = 1.0e30
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H6_S1 signal-prefix length model prediction effect experiment.")
+    parser = argparse.ArgumentParser(description="Run H4_S1 signal-prefix length model prediction effect experiment.")
     parser.add_argument("--signal-path", default="datasets/processed/mill_signal_data.csv")
     parser.add_argument("--process-info-path", default="datasets/processed/mill_process_info.csv")
     parser.add_argument("--case-scope", type=int, nargs="+", default=DEFAULT_CASE_SCOPE)
@@ -206,7 +206,7 @@ def parse_signal(value: Any) -> np.ndarray:
 
 
 def execution_dir(output_root: Path, timestamp: str) -> Path:
-    return output_root / "H6" / "S1" / f"{timestamp}_{TOPIC}"
+    return output_root / "H4" / "S1" / f"{timestamp}_{TOPIC}"
 
 
 def timestamp_from_execution_dir(output_dir: Path) -> str:
@@ -326,7 +326,7 @@ def completed_task_ids(metric_path: Path, resume: bool) -> set[str]:
 
 
 def find_resume_dir(output_root: Path, signature: dict[str, Any]) -> Path | None:
-    root = output_root / "H6" / "S1"
+    root = output_root / "H4" / "S1"
     if not root.exists():
         return None
     candidates = sorted(root.glob(f"*_{TOPIC}"), key=lambda path: path.stat().st_mtime, reverse=True)
@@ -397,11 +397,11 @@ def ordered_h6_models(models: list[str]) -> list[str]:
     selected = []
     for model in models:
         name = canonical_h6_model_name(model)
-        if name not in H6_MODEL_ORDER:
-            raise ValueError(f"Unsupported H6_S1 model: {model}. Supported models: {H6_MODEL_ORDER}")
+        if name not in H4_MODEL_ORDER:
+            raise ValueError(f"Unsupported H4_S1 model: {model}. Supported models: {H4_MODEL_ORDER}")
         if name not in selected:
             selected.append(name)
-    order = {name: idx for idx, name in enumerate(H6_MODEL_ORDER)}
+    order = {name: idx for idx, name in enumerate(H4_MODEL_ORDER)}
     return sorted(selected, key=lambda name: order[name])
 
 
@@ -1071,9 +1071,9 @@ def run_grid(
     output_dir: Path,
     resume: bool,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    shift_path = output_dir / "metrics" / "H6_S1_shift_metrics.csv"
-    prediction_path = output_dir / "predictions" / "H6_S1_predictions.csv"
-    split_path = output_dir / "splits" / "H6_S1_splits.csv"
+    shift_path = output_dir / "metrics" / "H4_S1_shift_metrics.csv"
+    prediction_path = output_dir / "predictions" / "H4_S1_predictions.csv"
+    split_path = output_dir / "splits" / "H4_S1_splits.csv"
     cases = sorted(feature_matrix["case_id"].unique().tolist())
     percents = sorted(feature_matrix["signal_prefix_percent"].unique().tolist())
     total_tasks = int(sum(len(effective_seeds_for_h6_model(model, seeds)) * len(cases) for model in models) * len(percents))
@@ -1317,7 +1317,7 @@ def plot_prefix_effect(output_dir: Path, model_metrics: pd.DataFrame, dpi: int) 
     ax.grid(True, color="#e5e7eb", linewidth=0.5)
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    path = output_dir / "figures" / "H6_S1_signal_prefix_length_effect_rmse.png"
+    path = output_dir / "figures" / "H4_S1_signal_prefix_length_effect_rmse.png"
     save_figure_dual(fig, path, dpi=dpi)
     plt.close(fig)
     return path
@@ -1341,18 +1341,18 @@ def write_report(output_dir: Path, summary: dict[str, Any], model_metrics: pd.Da
         "",
         "## Outputs",
         "",
-        "- Feature matrix: `data/H6_S1_feature_matrix.csv`",
-        "- Hybrid LSTM sequence index: `data/H6_S1_hybrid_sequence_index.csv` when `hybrid_lstm_process` is selected",
-        "- Common preprocessing: `analysis/H6_S1_common_preprocessing.json`",
-        "- Feature sanitization: `analysis/H6_S1_feature_sanitization.json`",
-        "- Shift metrics: `metrics/H6_S1_shift_metrics.csv`",
-        "- Case-wise metrics: `metrics/H6_S1_case_metrics.csv`",
-        "- Case-wise model metrics: `metrics/H6_S1_case_model_metrics.csv`",
-        "- Seed metrics: `metrics/H6_S1_seed_metrics.csv`",
-        "- Prefix-model metrics: `metrics/H6_S1_prefix_model_metrics.csv`",
-        "- Predictions: `predictions/H6_S1_predictions.csv`",
-        "- Progress state: `logs/H6_S1_progress_state.json`",
-        "- Prefix effect figure: `figures/H6_S1_signal_prefix_length_effect_rmse.{png,svg}`",
+        "- Feature matrix: `data/H4_S1_feature_matrix.csv`",
+        "- Hybrid LSTM sequence index: `data/H4_S1_hybrid_sequence_index.csv` when `hybrid_lstm_process` is selected",
+        "- Common preprocessing: `analysis/H4_S1_common_preprocessing.json`",
+        "- Feature sanitization: `analysis/H4_S1_feature_sanitization.json`",
+        "- Shift metrics: `metrics/H4_S1_shift_metrics.csv`",
+        "- Case-wise metrics: `metrics/H4_S1_case_metrics.csv`",
+        "- Case-wise model metrics: `metrics/H4_S1_case_model_metrics.csv`",
+        "- Seed metrics: `metrics/H4_S1_seed_metrics.csv`",
+        "- Prefix-model metrics: `metrics/H4_S1_prefix_model_metrics.csv`",
+        "- Predictions: `predictions/H4_S1_predictions.csv`",
+        "- Progress state: `logs/H4_S1_progress_state.json`",
+        "- Prefix effect figure: `figures/H4_S1_signal_prefix_length_effect_rmse.{png,svg}`",
         "",
         "## Best Prefix By Model",
         "",
@@ -1377,7 +1377,7 @@ def write_report(output_dir: Path, summary: dict[str, Any], model_metrics: pd.Da
             "and mean absolute VB to make cases with different VB scales easier to compare.",
         ]
     )
-    (output_dir / "reports" / "H6_S1_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (output_dir / "reports" / "H4_S1_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -1411,8 +1411,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         log_progress(f"Using new execution directory: {output_dir}")
 
     config = build_config(args, timestamp, output_dir)
-    write_yaml(output_dir / "configs" / "H6_S1_input_config.yaml", config)
-    write_json(output_dir / "logs" / "H6_S1_environment.json", collect_environment())
+    write_yaml(output_dir / "configs" / "H4_S1_input_config.yaml", config)
+    write_json(output_dir / "logs" / "H4_S1_environment.json", collect_environment())
 
     log_progress("Loading input data.")
     data, preprocessing_report = load_inputs(args)
@@ -1485,11 +1485,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "planned_atomic_fits": int(sum(len(effective_seeds_for_h6_model(model, args.seeds)) * len(prefix_percents) * len(cases) for model in models)),
         "dry_run": bool(args.dry_run),
     }
-    feature_matrix.to_csv(output_dir / "data" / "H6_S1_feature_matrix.csv", index=False)
+    feature_matrix.to_csv(output_dir / "data" / "H4_S1_feature_matrix.csv", index=False)
     if sequence_matrix is not None:
-        sequence_matrix.drop(columns=["sequence"]).to_csv(output_dir / "data" / "H6_S1_hybrid_sequence_index.csv", index=False)
-    write_json(output_dir / "analysis" / "H6_S1_common_preprocessing.json", preprocessing_report)
-    write_json(output_dir / "analysis" / "H6_S1_feature_sanitization.json", sanitization_report)
+        sequence_matrix.drop(columns=["sequence"]).to_csv(output_dir / "data" / "H4_S1_hybrid_sequence_index.csv", index=False)
+    write_json(output_dir / "analysis" / "H4_S1_common_preprocessing.json", preprocessing_report)
+    write_json(output_dir / "analysis" / "H4_S1_feature_sanitization.json", sanitization_report)
     if args.dry_run:
         write_progress_state(
             output_dir,
@@ -1498,7 +1498,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             completed_tasks=0,
             current_task=None,
         )
-        write_json(output_dir / "analysis" / "H6_S1_summary.json", summary)
+        write_json(output_dir / "analysis" / "H4_S1_summary.json", summary)
         log_progress(f"Dry-run completed: {summary['planned_atomic_fits']} atomic fits planned; no models trained.")
         return summary
 
@@ -1520,14 +1520,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise
     seed_metrics, model_metrics, best_by_model = aggregate_metrics(shift_metrics)
     case_metrics, case_model_metrics = build_casewise_metrics(shift_metrics)
-    shift_metrics.to_csv(output_dir / "metrics" / "H6_S1_shift_metrics.csv", index=False)
-    case_metrics.to_csv(output_dir / "metrics" / "H6_S1_case_metrics.csv", index=False)
-    case_model_metrics.to_csv(output_dir / "metrics" / "H6_S1_case_model_metrics.csv", index=False)
-    seed_metrics.to_csv(output_dir / "metrics" / "H6_S1_seed_metrics.csv", index=False)
-    model_metrics.to_csv(output_dir / "metrics" / "H6_S1_prefix_model_metrics.csv", index=False)
-    best_by_model.to_csv(output_dir / "analysis" / "H6_S1_best_prefix_by_model.csv", index=False)
-    predictions.to_csv(output_dir / "predictions" / "H6_S1_predictions.csv", index=False)
-    splits.to_csv(output_dir / "splits" / "H6_S1_splits.csv", index=False)
+    shift_metrics.to_csv(output_dir / "metrics" / "H4_S1_shift_metrics.csv", index=False)
+    case_metrics.to_csv(output_dir / "metrics" / "H4_S1_case_metrics.csv", index=False)
+    case_model_metrics.to_csv(output_dir / "metrics" / "H4_S1_case_model_metrics.csv", index=False)
+    seed_metrics.to_csv(output_dir / "metrics" / "H4_S1_seed_metrics.csv", index=False)
+    model_metrics.to_csv(output_dir / "metrics" / "H4_S1_prefix_model_metrics.csv", index=False)
+    best_by_model.to_csv(output_dir / "analysis" / "H4_S1_best_prefix_by_model.csv", index=False)
+    predictions.to_csv(output_dir / "predictions" / "H4_S1_predictions.csv", index=False)
+    splits.to_csv(output_dir / "splits" / "H4_S1_splits.csv", index=False)
     fig_path = plot_prefix_effect(output_dir, model_metrics, args.dpi)
 
     summary.update(
@@ -1541,7 +1541,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "figure_path": str(fig_path.relative_to(output_dir)),
         }
     )
-    write_json(output_dir / "analysis" / "H6_S1_summary.json", summary)
+    write_json(output_dir / "analysis" / "H4_S1_summary.json", summary)
     write_report(output_dir, summary, model_metrics, best_by_model)
     return summary
 
@@ -1554,7 +1554,7 @@ def main() -> None:
         print(json.dumps(to_builtin(summary), indent=2, ensure_ascii=False))
     except Exception:
         if output_dir is not None:
-            (output_dir / "logs" / "H6_S1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (output_dir / "logs" / "H4_S1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
         raise
 
 

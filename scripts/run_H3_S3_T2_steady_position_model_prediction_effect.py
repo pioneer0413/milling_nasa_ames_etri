@@ -36,24 +36,28 @@ from milling_experiment_framework.experiments.h2_execution_utils import (
 from milling_experiment_framework.models.h2_regressors import canonical_model_name, create_h2_feature_pipeline
 from milling_experiment_framework.preprocessing.vb_common import COMMON_VB_PREPROCESSING_RULES, apply_common_vb_prediction_preprocessing
 from milling_experiment_framework.visualization.figure_export import save_figure_dual
-from scripts import run_H5_S2_T1_steady_length_feature_vb_suitability as t1
+from scripts import run_H3_S2_T1_steady_length_feature_vb_suitability as t1
+from scripts import run_H3_S2_T2_steady_position_feature_vb_suitability as t2
 
 
-PREFIX = "H5_S3_T1"
-TOPIC = "steady_length_model_prediction_effect"
-SEGMENT_SETTING = t1.SEGMENT_SETTING
-DEFAULT_SENSORS = [t1.SENSOR]
-DEFAULT_FEATURES = t1.TARGET_FEATURES
-STEADY_LENGTH_PATHS = t1.STEADY_LENGTH_PATHS
-DEFAULT_CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+PREFIX = "H3_S3_T2"
+TOPIC = "steady_position_model_prediction_effect"
+SEGMENT_SETTING = t2.SEGMENT_SETTING
+DEFAULT_SENSORS = [t2.SENSOR]
+DEFAULT_FEATURES = t2.TARGET_FEATURES
+POSITIONS = t2.POSITIONS
+BASE_STEADY_LENGTH = t2.BASE_STEADY_LENGTH
+SUBWINDOW_LENGTH = t2.SUBWINDOW_LENGTH
+DEFAULT_CASE_SCOPE = t2.DEFAULT_CASE_SCOPE
 DEFAULT_MODELS = ["linear_regression", "svr", "random_forest", "xgboost", "mlp", "feature_gru"]
 DEFAULT_SEEDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H5_S3_T1 steady-length model prediction effect experiment.")
+    parser = argparse.ArgumentParser(description="Run H3_S3_T2 steady-position model prediction effect experiment.")
     parser.add_argument("--signal-path", default="datasets/processed/mill_signal_data.csv")
     parser.add_argument("--process-info-path", default="datasets/processed/mill_process_info.csv")
+    parser.add_argument("--metadata-path", default=t2.BASE_METADATA_PATH)
     parser.add_argument("--case-scope", type=int, nargs="+", default=DEFAULT_CASE_SCOPE)
     parser.add_argument("--sensors", nargs="+", default=DEFAULT_SENSORS)
     parser.add_argument("--features", nargs="+", default=DEFAULT_FEATURES)
@@ -67,7 +71,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def to_builtin(value: Any) -> Any:
-    return t1.to_builtin(value)
+    return t2.to_builtin(value)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -89,7 +93,7 @@ def resolve(path: str | Path) -> Path:
 
 
 def execution_dir(output_root: Path, timestamp: str) -> Path:
-    return output_root / "H5" / "S3" / "T1" / f"{timestamp}_{TOPIC}"
+    return output_root / "H3" / "S3" / "T2" / f"{timestamp}_{TOPIC}"
 
 
 def make_dirs(output_dir: Path) -> None:
@@ -107,26 +111,32 @@ def build_config(args: argparse.Namespace, timestamp: str, output_dir: Path) -> 
             "experiment_id": f"{timestamp}_{PREFIX}_{TOPIC}",
             "timestamp": timestamp,
             "execution_dir": str(output_dir),
-            "analysis_type": "steady_length_model_prediction_effect",
+            "analysis_type": "steady_position_model_prediction_effect",
         },
         "data": {
             "signal_path": args.signal_path,
             "process_info_path": args.process_info_path,
+            "metadata_path": args.metadata_path,
             "case_scope": args.case_scope,
             "sensors": args.sensors,
             "segment_setting": SEGMENT_SETTING,
-            "metadata_paths_by_steady_length": STEADY_LENGTH_PATHS,
         },
         "common_preprocessing": COMMON_VB_PREPROCESSING_RULES,
+        "windowing": {
+            "base_steady_length": BASE_STEADY_LENGTH,
+            "subwindow_length": SUBWINDOW_LENGTH,
+            "positions": POSITIONS,
+            "source": "H3_S2_T2 position definition",
+        },
         "features": {
-            "source": "H5_S2_T1 length-specific steady-cut feature extraction",
-            "base_feature_names": t1.TARGET_FEATURES,
+            "source": "H3_S2_T2 position-specific steady-cut feature extraction",
+            "base_feature_names": t2.TARGET_FEATURES,
             "selected_feature_names": selected_features,
             "feature_naming": "{sensor}__{feature_name}",
         },
         "modeling": {
             "task": "VB regression",
-            "input": "one row per case/run/steady_length, columns = selected sensors x selected features",
+            "input": "one row per case/run/steady_position, columns = selected sensors x selected features",
             "models": models,
             "seeds": args.seeds,
             "seed_policy": "linear_regression and svr run once with seed=-1; seeded models use configured seeds",
@@ -145,9 +155,9 @@ def validate_features(features: list[str]) -> list[str]:
         name = str(feature).strip()
         if name and name not in selected:
             selected.append(name)
-    missing = [name for name in selected if name not in t1.TARGET_FEATURES]
+    missing = [name for name in selected if name not in t2.TARGET_FEATURES]
     if missing:
-        raise ValueError(f"Unsupported features: {missing}. Supported features: {t1.TARGET_FEATURES}")
+        raise ValueError(f"Unsupported features: {missing}. Supported features: {t2.TARGET_FEATURES}")
     if not selected:
         raise ValueError("At least one feature must be selected.")
     return selected
@@ -159,17 +169,23 @@ def feature_columns(sensors: list[str], features: list[str]) -> list[str]:
 
 def load_feature_wide(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
     selected_features = validate_features(args.features)
-    metadata = t1.load_metadata()
+    metadata = pd.read_csv(resolve(args.metadata_path))
     signal = pd.read_csv(resolve(args.signal_path), usecols=["case", "run", *args.sensors])
     process = pd.read_csv(resolve(args.process_info_path))
-    missing_process = {"case", "run", "VB"}.difference(process.columns)
+    required_metadata = {"case", "run", "idx_start", "idx_end", "signal_length"}
+    required_process = {"case", "run", "VB"}
+    missing_metadata = required_metadata.difference(metadata.columns)
+    missing_process = required_process.difference(process.columns)
     missing_signal = set(args.sensors).difference(signal.columns)
+    if missing_metadata:
+        raise ValueError(f"metadata missing columns: {sorted(missing_metadata)}")
     if missing_process:
         raise ValueError(f"process info missing columns: {sorted(missing_process)}")
     if missing_signal:
         raise ValueError(f"signal data missing sensor columns: {sorted(missing_signal)}")
 
-    keys = t1.metadata_keys(metadata, args.case_scope)
+    keys = metadata[["case", "run", "idx_start", "idx_end", "signal_length"]].drop_duplicates().copy()
+    keys = keys.loc[keys["case"].isin(args.case_scope)].copy()
     merged = keys.merge(signal, on=["case", "run"], how="left", validate="one_to_one")
     merged = merged.merge(process, on=["case", "run"], how="left", validate="one_to_one")
     missing_any = merged[args.sensors].isna().any(axis=1)
@@ -183,32 +199,36 @@ def load_feature_wide(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str,
         case = int(source_row.case)
         run_id = int(source_row.run)
         arrays = {sensor: t1.parse_signal(getattr(source_row, sensor)) for sensor in args.sensors}
-        for length in sorted(STEADY_LENGTH_PATHS):
-            meta_row = t1.row_for(metadata, length, case, run_id)
-            base: dict[str, Any] = {
-                "sample_id": f"case_{case:02d}_run_{run_id:03d}_length_{int(length)}",
+        min_signal_size = min(arr.size for arr in arrays.values())
+        bounds = t2.position_bounds(int(source_row.idx_start), int(source_row.idx_end), min_signal_size)
+        for position in POSITIONS:
+            window_start, window_end = bounds[position]
+            row: dict[str, Any] = {
+                "sample_id": f"case_{case:02d}_run_{run_id:03d}_position_{position}",
                 "dataset_run_id": f"case_{case:02d}_run_{run_id:03d}",
                 "case_id": case,
                 "run": run_id,
-                "steady_length": int(length),
+                "steady_position": position,
+                "position_order": POSITIONS.index(position),
+                "base_steady_length": BASE_STEADY_LENGTH,
+                "subwindow_length": SUBWINDOW_LENGTH,
                 "segment_setting": SEGMENT_SETTING,
                 "VB": float(source_row.VB),
                 "time": getattr(source_row, "time", np.nan),
                 "DOC": getattr(source_row, "DOC", np.nan),
                 "feed": getattr(source_row, "feed", np.nan),
                 "material_name": getattr(source_row, "material_name", np.nan),
-                "idx_start": int(meta_row["idx_start"]),
-                "idx_end": int(meta_row["idx_end"]),
-                "steady_length_actual": int(meta_row["steady_length_actual"]),
+                "base_idx_start": int(source_row.idx_start),
+                "base_idx_end": int(source_row.idx_end),
+                "subwindow_idx_start": int(window_start),
+                "subwindow_idx_end": int(window_end),
             }
             for sensor, signal_arr in arrays.items():
-                idx_start = int(np.clip(meta_row["idx_start"], 0, signal_arr.size))
-                idx_end = int(np.clip(meta_row["idx_end"], idx_start, signal_arr.size))
-                values = t1.compute_features(signal_arr[idx_start:idx_end])
+                values = t1.compute_features(signal_arr[window_start:window_end])
                 for feature_name in selected_features:
-                    base[f"{sensor}__{feature_name}"] = values[feature_name]
-            rows.append(base)
-    feature_wide = pd.DataFrame(rows).sort_values(["steady_length", "case_id", "run"]).reset_index(drop=True)
+                    row[f"{sensor}__{feature_name}"] = values[feature_name]
+            rows.append(row)
+    feature_wide = pd.DataFrame(rows).sort_values(["position_order", "case_id", "run"]).reset_index(drop=True)
     missing_cols = [col for col in feature_columns(args.sensors, selected_features) if col not in feature_wide.columns]
     if missing_cols:
         raise ValueError(f"Missing feature columns: {missing_cols}")
@@ -231,7 +251,7 @@ def metric_dict(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 
 
 def split_for_case(data: pd.DataFrame, target_case: int) -> pd.DataFrame:
-    split = data[["sample_id", "dataset_run_id", "case_id", "run", "steady_length", "VB"]].copy()
+    split = data[["sample_id", "dataset_run_id", "case_id", "run", "steady_position", "position_order", "VB"]].copy()
     split["split"] = np.where(split["case_id"].eq(target_case), "test", "train")
     return split
 
@@ -241,18 +261,20 @@ def run_grid(feature_wide: pd.DataFrame, input_features: list[str], models: list
     prediction_rows: list[pd.DataFrame] = []
     split_rows: list[pd.DataFrame] = []
     cases = sorted(feature_wide["case_id"].unique().tolist())
-    lengths = sorted(feature_wide["steady_length"].unique().tolist())
+    positions = feature_wide[["steady_position", "position_order"]].drop_duplicates().sort_values("position_order")
 
-    for length in lengths:
-        length_df = feature_wide.loc[feature_wide["steady_length"].eq(length)].copy()
+    for pos_row in positions.itertuples(index=False):
+        position = str(pos_row.steady_position)
+        position_order = int(pos_row.position_order)
+        position_df = feature_wide.loc[feature_wide["steady_position"].eq(position)].copy()
         for model_name in models:
             for seed in effective_seeds_for_model(model_name, seeds):
                 for target_case in cases:
-                    split = split_for_case(length_df, target_case)
-                    train = length_df.loc[length_df["case_id"].ne(target_case)].copy()
-                    test = length_df.loc[length_df["case_id"].eq(target_case)].copy()
+                    split = split_for_case(position_df, target_case)
+                    train = position_df.loc[position_df["case_id"].ne(target_case)].copy()
+                    test = position_df.loc[position_df["case_id"].eq(target_case)].copy()
                     if train.empty or test.empty:
-                        raise ValueError(f"Empty split for length={length}, target_case={target_case}")
+                        raise ValueError(f"Empty split for position={position}, target_case={target_case}")
                     model = create_h2_feature_pipeline(model_name, model_seed_value(seed), model_defaults=None)
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
@@ -262,7 +284,8 @@ def run_grid(feature_wide: pd.DataFrame, input_features: list[str], models: list
                     scenario = f"train_without_case_{target_case}_to_case_{target_case}"
                     shift_rows.append(
                         {
-                            "steady_length": int(length),
+                            "steady_position": position,
+                            "position_order": position_order,
                             "model": model_name,
                             "seed": int(seed),
                             "seed_label": seed_label(seed),
@@ -275,7 +298,7 @@ def run_grid(feature_wide: pd.DataFrame, input_features: list[str], models: list
                             **metrics,
                         }
                     )
-                    preds = test[["sample_id", "dataset_run_id", "case_id", "run", "steady_length", "VB"]].copy()
+                    preds = test[["sample_id", "dataset_run_id", "case_id", "run", "steady_position", "position_order", "VB"]].copy()
                     preds["model"] = model_name
                     preds["seed"] = int(seed)
                     preds["seed_label"] = seed_label(seed)
@@ -298,7 +321,7 @@ def run_grid(feature_wide: pd.DataFrame, input_features: list[str], models: list
 
 def aggregate_metrics(shift_metrics: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     seed_metrics = (
-        shift_metrics.groupby(["steady_length", "model", "seed", "seed_label"], as_index=False)
+        shift_metrics.groupby(["steady_position", "position_order", "model", "seed", "seed_label"], as_index=False)
         .agg(
             mean_mae_over_cases=("metric_mae", "mean"),
             mean_rmse_over_cases=("metric_rmse", "mean"),
@@ -311,7 +334,7 @@ def aggregate_metrics(shift_metrics: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
     )
     seed_metrics["std_rmse_over_cases"] = seed_metrics["std_rmse_over_cases"].fillna(0.0)
     model_metrics = (
-        seed_metrics.groupby(["steady_length", "model"], as_index=False)
+        seed_metrics.groupby(["steady_position", "position_order", "model"], as_index=False)
         .agg(
             mean_mae=("mean_mae_over_cases", "mean"),
             std_mae=("mean_mae_over_cases", "std"),
@@ -331,27 +354,31 @@ def aggregate_metrics(shift_metrics: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
     model_metrics["rank_by_rmse_within_model"] = model_metrics.groupby("model")["mean_rmse"].rank(ascending=True, method="first").astype(int)
     model_metrics["rank_by_rmse_overall"] = model_metrics["mean_rmse"].rank(ascending=True, method="first").astype(int)
     best_by_model = model_metrics.sort_values(["model", "mean_rmse"]).groupby("model", as_index=False).head(1)
-    return seed_metrics, model_metrics.sort_values(["model", "steady_length"]).reset_index(drop=True), best_by_model.reset_index(drop=True)
+    model_metrics = model_metrics.sort_values(["model", "position_order"]).reset_index(drop=True)
+    return seed_metrics, model_metrics, best_by_model.reset_index(drop=True)
 
 
-def plot_length_effect(output_dir: Path, model_metrics: pd.DataFrame, dpi: int) -> Path:
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+def plot_position_effect(output_dir: Path, model_metrics: pd.DataFrame, dpi: int) -> Path:
+    fig, ax = plt.subplots(figsize=(6.6, 4.6))
     for model_name, group in model_metrics.groupby("model"):
-        group = group.sort_values("steady_length")
-        ax.plot(group["steady_length"], group["mean_rmse"], marker="o", linewidth=1.4, label=model_name)
+        group = group.sort_values("position_order")
+        x = group["position_order"].to_numpy(dtype=float)
+        ax.plot(x, group["mean_rmse"], marker="o", linewidth=1.4, label=model_name)
         ax.fill_between(
-            group["steady_length"].to_numpy(dtype=float),
+            x,
             (group["mean_rmse"] - group["std_rmse"]).to_numpy(dtype=float),
             (group["mean_rmse"] + group["std_rmse"]).to_numpy(dtype=float),
             alpha=0.12,
         )
-    ax.set_xlabel("steady-cut length")
+    ax.set_xticks(np.arange(len(POSITIONS)))
+    ax.set_xticklabels(POSITIONS)
+    ax.set_xlabel("2000-sample window position inside 5000-sample steady-cut")
     ax.set_ylabel("mean RMSE over leave-one-case-out folds")
-    ax.set_title(f"{PREFIX} prediction error by steady-cut length")
+    ax.set_title(f"{PREFIX} prediction error by steady-cut position")
     ax.grid(True, color="#e5e7eb", linewidth=0.5)
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    path = output_dir / "figures" / "H5_S3_T1_length_effect_rmse.png"
+    path = output_dir / "figures" / "H3_S3_T2_position_effect_rmse.png"
     save_figure_dual(fig, path, dpi=dpi)
     plt.close(fig)
     return path
@@ -360,13 +387,15 @@ def plot_length_effect(output_dir: Path, model_metrics: pd.DataFrame, dpi: int) 
 def write_report(output_dir: Path, summary: dict[str, Any], model_metrics: pd.DataFrame, best_by_model: pd.DataFrame) -> None:
     overall = model_metrics.sort_values("mean_rmse").head(12)
     lines = [
-        f"# {PREFIX} Steady-length Model Prediction Effect",
+        f"# {PREFIX} Steady-position Model Prediction Effect",
         "",
         "## Scope",
         "",
         f"- Sensors: `{summary['sensors']}`",
         f"- Segment: `{SEGMENT_SETTING}`",
-        f"- Steady-cut lengths: `{summary['steady_lengths']}`",
+        f"- Base steady-cut length: `{BASE_STEADY_LENGTH}`",
+        f"- Sub-window length: `{SUBWINDOW_LENGTH}`",
+        f"- Positions: `{summary['steady_positions']}`",
         f"- Selected features: `{summary['selected_features']}`",
         f"- Feature input column count: `{summary['input_feature_count']}`",
         f"- Split: leave-one-case-out over `{summary['case_count']}` cases",
@@ -374,35 +403,35 @@ def write_report(output_dir: Path, summary: dict[str, Any], model_metrics: pd.Da
         "",
         "## Outputs",
         "",
-        "- Feature matrix: `data/H5_S3_T1_feature_matrix.csv`",
-        "- Common preprocessing: `analysis/H5_S3_T1_common_preprocessing.json`",
-        "- Shift metrics: `metrics/H5_S3_T1_shift_metrics.csv`",
-        "- Seed metrics: `metrics/H5_S3_T1_seed_metrics.csv`",
-        "- Length-model metrics: `metrics/H5_S3_T1_length_model_metrics.csv`",
-        "- Predictions: `predictions/H5_S3_T1_predictions.csv`",
-        "- Length effect figure: `figures/H5_S3_T1_length_effect_rmse.{png,svg}`",
+        "- Feature matrix: `data/H3_S3_T2_feature_matrix.csv`",
+        "- Common preprocessing: `analysis/H3_S3_T2_common_preprocessing.json`",
+        "- Shift metrics: `metrics/H3_S3_T2_shift_metrics.csv`",
+        "- Seed metrics: `metrics/H3_S3_T2_seed_metrics.csv`",
+        "- Position-model metrics: `metrics/H3_S3_T2_position_model_metrics.csv`",
+        "- Predictions: `predictions/H3_S3_T2_predictions.csv`",
+        "- Position effect figure: `figures/H3_S3_T2_position_effect_rmse.{png,svg}`",
         "",
-        "## Best Length By Model",
+        "## Best Position By Model",
         "",
-        "| model | best_steady_length | mean_rmse | mean_mae | mean_r2 |",
+        "| model | best_steady_position | mean_rmse | mean_mae | mean_r2 |",
         "|---|---:|---:|---:|---:|",
     ]
     for row in best_by_model.itertuples(index=False):
-        lines.append(f"| {row.model} | {int(row.steady_length)} | {row.mean_rmse:.6f} | {row.mean_mae:.6f} | {row.mean_r2:.6f} |")
-    lines.extend(["", "## Overall Top Rows", "", "| model | steady_length | mean_rmse | mean_mae | mean_r2 |", "|---|---:|---:|---:|---:|"])
+        lines.append(f"| {row.model} | {row.steady_position} | {row.mean_rmse:.6f} | {row.mean_mae:.6f} | {row.mean_r2:.6f} |")
+    lines.extend(["", "## Overall Top Rows", "", "| model | steady_position | mean_rmse | mean_mae | mean_r2 |", "|---|---:|---:|---:|---:|"])
     for row in overall.itertuples(index=False):
-        lines.append(f"| {row.model} | {int(row.steady_length)} | {row.mean_rmse:.6f} | {row.mean_mae:.6f} | {row.mean_r2:.6f} |")
+        lines.append(f"| {row.model} | {row.steady_position} | {row.mean_rmse:.6f} | {row.mean_mae:.6f} | {row.mean_r2:.6f} |")
     lines.extend(
         [
             "",
             "## Method Note",
             "",
-            "For each steady-cut length, the selected H1/H5 features are recomputed per selected sensor from the corresponding steady metadata window. "
-            "Each model is trained on all cases except one and tested on the held-out case. Metrics are averaged over held-out cases and then over seeds where applicable.",
+            "The 5000-sample steady-cut interval is taken from the H3_S2_T2 metadata path. "
+            "Selected features are recomputed per selected sensor on 2000-sample start, center, and end windows, then evaluated with leave-one-case-out VB regression.",
             "Common VB preprocessing is applied before feature construction: missing VB is interpolated within each case, then each case's first run is excluded.",
         ]
     )
-    (output_dir / "reports" / "H5_S3_T1_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (output_dir / "reports" / "H3_S3_T2_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -415,19 +444,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     models = [canonical_model_name(model) for model in args.models]
     args.features = validate_features(args.features)
     config = build_config(args, timestamp, output_dir)
-    write_yaml(output_dir / "configs" / "H5_S3_T1_input_config.yaml", config)
-    write_json(output_dir / "logs" / "H5_S3_T1_environment.json", collect_environment())
+    write_yaml(output_dir / "configs" / "H3_S3_T2_input_config.yaml", config)
+    write_json(output_dir / "logs" / "H3_S3_T2_environment.json", collect_environment())
 
     feature_wide, preprocessing_report = load_feature_wide(args)
     input_features = feature_columns(args.sensors, args.features)
-    lengths = sorted(feature_wide["steady_length"].unique().tolist())
+    positions = feature_wide[["steady_position", "position_order"]].drop_duplicates().sort_values("position_order")
+    position_names = positions["steady_position"].tolist()
     cases = sorted(feature_wide["case_id"].unique().tolist())
     summary: dict[str, Any] = {
         "experiment_id": config["experiment"]["experiment_id"],
         "execution_dir": str(output_dir),
         "sensors": args.sensors,
         "segment_setting": SEGMENT_SETTING,
-        "steady_lengths": lengths,
+        "base_steady_length": BASE_STEADY_LENGTH,
+        "subwindow_length": SUBWINDOW_LENGTH,
+        "steady_positions": position_names,
         "selected_features": args.features,
         "feature_columns": input_features,
         "input_feature_count": int(len(input_features)),
@@ -438,24 +470,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "case_count": int(len(cases)),
         "case_run_count": int(feature_wide[["case_id", "run"]].drop_duplicates().shape[0]),
         "feature_matrix_rows": int(len(feature_wide)),
-        "planned_atomic_fits": int(sum(len(effective_seeds_for_model(model, args.seeds)) * len(lengths) * len(cases) for model in models)),
+        "planned_atomic_fits": int(sum(len(effective_seeds_for_model(model, args.seeds)) * len(position_names) * len(cases) for model in models)),
         "dry_run": bool(args.dry_run),
     }
-    feature_wide.to_csv(output_dir / "data" / "H5_S3_T1_feature_matrix.csv", index=False)
-    write_json(output_dir / "analysis" / "H5_S3_T1_common_preprocessing.json", preprocessing_report)
+    feature_wide.to_csv(output_dir / "data" / "H3_S3_T2_feature_matrix.csv", index=False)
+    write_json(output_dir / "analysis" / "H3_S3_T2_common_preprocessing.json", preprocessing_report)
     if args.dry_run:
-        write_json(output_dir / "analysis" / "H5_S3_T1_summary.json", summary)
+        write_json(output_dir / "analysis" / "H3_S3_T2_summary.json", summary)
         return summary
 
     shift_metrics, predictions, splits = run_grid(feature_wide, input_features, models, args.seeds)
     seed_metrics, model_metrics, best_by_model = aggregate_metrics(shift_metrics)
-    shift_metrics.to_csv(output_dir / "metrics" / "H5_S3_T1_shift_metrics.csv", index=False)
-    seed_metrics.to_csv(output_dir / "metrics" / "H5_S3_T1_seed_metrics.csv", index=False)
-    model_metrics.to_csv(output_dir / "metrics" / "H5_S3_T1_length_model_metrics.csv", index=False)
-    best_by_model.to_csv(output_dir / "analysis" / "H5_S3_T1_best_length_by_model.csv", index=False)
-    predictions.to_csv(output_dir / "predictions" / "H5_S3_T1_predictions.csv", index=False)
-    splits.to_csv(output_dir / "splits" / "H5_S3_T1_splits.csv", index=False)
-    fig_path = plot_length_effect(output_dir, model_metrics, args.dpi)
+    shift_metrics.to_csv(output_dir / "metrics" / "H3_S3_T2_shift_metrics.csv", index=False)
+    seed_metrics.to_csv(output_dir / "metrics" / "H3_S3_T2_seed_metrics.csv", index=False)
+    model_metrics.to_csv(output_dir / "metrics" / "H3_S3_T2_position_model_metrics.csv", index=False)
+    best_by_model.to_csv(output_dir / "analysis" / "H3_S3_T2_best_position_by_model.csv", index=False)
+    predictions.to_csv(output_dir / "predictions" / "H3_S3_T2_predictions.csv", index=False)
+    splits.to_csv(output_dir / "splits" / "H3_S3_T2_splits.csv", index=False)
+    fig_path = plot_position_effect(output_dir, model_metrics, args.dpi)
 
     summary.update(
         {
@@ -466,7 +498,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "figure_path": str(fig_path.relative_to(output_dir)),
         }
     )
-    write_json(output_dir / "analysis" / "H5_S3_T1_summary.json", summary)
+    write_json(output_dir / "analysis" / "H3_S3_T2_summary.json", summary)
     write_report(output_dir, summary, model_metrics, best_by_model)
     return summary
 
@@ -479,7 +511,7 @@ def main() -> None:
         print(json.dumps(to_builtin(summary), indent=2, ensure_ascii=False))
     except Exception:
         if output_dir is not None:
-            (output_dir / "logs" / "H5_S3_T1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (output_dir / "logs" / "H3_S3_T2_error.log").write_text(traceback.format_exc(), encoding="utf-8")
         raise
 
 

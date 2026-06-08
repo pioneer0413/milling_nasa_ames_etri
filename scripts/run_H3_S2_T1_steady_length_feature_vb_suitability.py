@@ -33,7 +33,7 @@ from milling_experiment_framework.experiment_logging.environment import collect_
 from milling_experiment_framework.visualization.figure_export import save_figure_dual
 
 
-PREFIX = "H5_S2_T1"
+PREFIX = "H3_S2_T1"
 TOPIC = "steady_length_feature_sequence_vb_suitability"
 SENSOR = "smcDC"
 SEGMENT_SETTING = "steady"
@@ -72,7 +72,7 @@ PROGNOSABILITY_EPSILON = 1e-12
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H5_S2_T1 steady-length feature-sequence/VB suitability analysis.")
+    parser = argparse.ArgumentParser(description="Run H3_S2_T1 steady-length feature-sequence/VB suitability analysis.")
     parser.add_argument("--signal-path", default="datasets/processed/mill_signal_data.csv")
     parser.add_argument("--process-info-path", default="datasets/processed/mill_process_info.csv")
     parser.add_argument("--case-scope", type=int, nargs="+", default=None)
@@ -130,7 +130,7 @@ def parse_signal(value: Any) -> np.ndarray:
 
 
 def execution_dir(output_root: Path, timestamp: str) -> Path:
-    return output_root / "H5" / "S2" / "T1" / f"{timestamp}_{TOPIC}"
+    return output_root / "H3" / "S2" / "T1" / f"{timestamp}_{TOPIC}"
 
 
 def make_dirs(output_dir: Path) -> None:
@@ -542,7 +542,7 @@ def draw_sequence_ax(
 
 
 def compute_case_suitability_text(feature_name: str, length: int, case: int, output_dir: Path) -> str:
-    cache_path = output_dir / "analysis" / "H5_S2_T1_case_level_suitability.csv"
+    cache_path = output_dir / "analysis" / "H3_S2_T1_case_level_suitability.csv"
     if not cache_path.exists():
         return ""
     # This helper is called after the case-level table is written; small CSV read keeps plotting code simple.
@@ -596,11 +596,11 @@ def write_report(output_dir: Path, summary: dict[str, Any], suitability_summary:
         "",
         "## Outputs",
         "",
-        "- Feature sequence table: `data/H5_S2_T1_feature_sequence_long.csv`",
-        "- Case-level suitability: `analysis/H5_S2_T1_case_level_suitability.csv`",
-        "- Feature-length suitability summary: `analysis/H5_S2_T1_feature_length_suitability_summary.csv`",
-        "- Per-feature figures: `figures/{feature}/H5_S2_T1_{feature}_sequence_vb_grid.{png,svg}`",
-        "- Suitability heatmap: `figures/H5_S2_T1_suitability_heatmap.{png,svg}`",
+        "- Feature sequence table: `data/H3_S2_T1_feature_sequence_long.csv`",
+        "- Case-level suitability: `analysis/H3_S2_T1_case_level_suitability.csv`",
+        "- Feature-length suitability summary: `analysis/H3_S2_T1_feature_length_suitability_summary.csv`",
+        "- Per-feature figures: `figures/{feature}/H3_S2_T1_{feature}_sequence_vb_grid.{png,svg}`",
+        "- Suitability heatmap: `figures/H3_S2_T1_suitability_heatmap.{png,svg}`",
         "",
         "## Top Suitability",
         "",
@@ -621,7 +621,7 @@ def write_report(output_dir: Path, summary: dict[str, Any], suitability_summary:
             "Each case-level sequence is ordered by `run`; the first visual row averages feature and VB sequences across all cases by run.",
         ]
     )
-    (output_dir / "reports" / "H5_S2_T1_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (output_dir / "reports" / "H3_S2_T1_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -632,8 +632,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     make_dirs(output_dir)
 
     config = build_config(args, timestamp, output_dir)
-    write_yaml(output_dir / "configs" / "H5_S2_T1_input_config.yaml", config)
-    write_json(output_dir / "logs" / "H5_S2_T1_environment.json", collect_environment())
+    write_yaml(output_dir / "configs" / "H3_S2_T1_input_config.yaml", config)
+    write_json(output_dir / "logs" / "H3_S2_T1_environment.json", collect_environment())
 
     metadata = load_metadata()
     signal, process = load_inputs(args)
@@ -651,14 +651,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "dry_run": bool(args.dry_run),
     }
     if args.dry_run:
-        write_json(output_dir / "analysis" / "H5_S2_T1_summary.json", summary)
+        write_json(output_dir / "analysis" / "H3_S2_T1_summary.json", summary)
         return summary
 
     feature_long = build_feature_long(metadata, signal, process, args.case_scope)
-    feature_long.to_csv(output_dir / "data" / "H5_S2_T1_feature_sequence_long.csv", index=False)
+    feature_long.to_csv(output_dir / "data" / "H3_S2_T1_feature_sequence_long.csv", index=False)
     case_level, suitability_summary = compute_suitability_tables(feature_long)
-    case_level.to_csv(output_dir / "analysis" / "H5_S2_T1_case_level_suitability.csv", index=False)
-    suitability_summary.to_csv(output_dir / "analysis" / "H5_S2_T1_feature_length_suitability_summary.csv", index=False)
+    case_level.to_csv(output_dir / "analysis" / "H3_S2_T1_case_level_suitability.csv", index=False)
+    suitability_summary.to_csv(output_dir / "analysis" / "H3_S2_T1_feature_length_suitability_summary.csv", index=False)
 
     figure_manifest: list[dict[str, Any]] = []
     for feature_name in TARGET_FEATURES:
@@ -669,7 +669,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         figure_manifest.append({"feature_name": feature_name, "figure_path": str(fig_path.relative_to(output_dir))})
     heatmap_path = plot_suitability_heatmap(output_dir, suitability_summary, args.dpi)
     figure_manifest.append({"feature_name": "__suitability_heatmap__", "figure_path": str(heatmap_path.relative_to(output_dir))})
-    pd.DataFrame(figure_manifest).to_csv(output_dir / "analysis" / "H5_S2_T1_figure_manifest.csv", index=False)
+    pd.DataFrame(figure_manifest).to_csv(output_dir / "analysis" / "H3_S2_T1_figure_manifest.csv", index=False)
 
     summary.update(
         {
@@ -680,7 +680,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "best_feature_length": suitability_summary.sort_values("mean_suitability", ascending=False).head(1).to_dict(orient="records"),
         }
     )
-    write_json(output_dir / "analysis" / "H5_S2_T1_summary.json", summary)
+    write_json(output_dir / "analysis" / "H3_S2_T1_summary.json", summary)
     write_report(output_dir, summary, suitability_summary)
     return summary
 
@@ -693,7 +693,7 @@ def main() -> None:
         print(json.dumps(to_builtin(summary), indent=2, ensure_ascii=False))
     except Exception:
         if output_dir is not None:
-            (output_dir / "logs" / "H5_S2_T1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (output_dir / "logs" / "H3_S2_T1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
         raise
 
 

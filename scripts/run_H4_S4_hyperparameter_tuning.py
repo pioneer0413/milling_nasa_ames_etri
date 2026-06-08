@@ -32,27 +32,27 @@ from milling_experiment_framework.experiment_logging.environment import collect_
 from milling_experiment_framework.experiments.h2_execution_utils import effective_seeds_for_model, model_seed_value, ordered_h2_models, seed_label
 from milling_experiment_framework.models.h2_regressors import canonical_model_name, create_h2_feature_pipeline
 from milling_experiment_framework.visualization.figure_export import save_figure_dual
-from scripts import run_H6_S3_feature_gru_segment_input_prediction_effect as h6s3
+from scripts import run_H4_S3_feature_gru_segment_input_prediction_effect as h4s3
 
 
-PREFIX = "H6_S4"
+PREFIX = "H4_S4"
 TOPIC = "segment_input_hyperparameter_tuning"
 DEFAULT_MODELS = ["random_forest"]
 SUPPORTED_MODELS = ["random_forest", "svr", "xgboost", "feature_gru"]
-SIGNATURE_FILE = "H6_S4_resume_signature.json"
-PROGRESS_FILE = "H6_S4_progress_state.json"
+SIGNATURE_FILE = "H4_S4_resume_signature.json"
+PROGRESS_FILE = "H4_S4_progress_state.json"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H6_S4 segment-input hyperparameter tuning experiment.")
+    parser = argparse.ArgumentParser(description="Run H4_S4 segment-input hyperparameter tuning experiment.")
     parser.add_argument("--signal-path", default="datasets/processed/mill_signal_data.csv")
     parser.add_argument("--process-info-path", default="datasets/processed/mill_process_info.csv")
     parser.add_argument("--heuristic-sequence-path", default="datasets/metadata/heuristic_sequence_peng2026.csv")
-    parser.add_argument("--case-scope", type=int, nargs="+", default=h6s3.DEFAULT_CASE_SCOPE)
-    parser.add_argument("--sensors", nargs="+", default=h6s3.DEFAULT_SENSORS)
-    parser.add_argument("--segments", nargs="+", default=h6s3.SEGMENT_SETTINGS, choices=h6s3.SEGMENT_SETTINGS)
+    parser.add_argument("--case-scope", type=int, nargs="+", default=h4s3.DEFAULT_CASE_SCOPE)
+    parser.add_argument("--sensors", nargs="+", default=h4s3.DEFAULT_SENSORS)
+    parser.add_argument("--segments", nargs="+", default=h4s3.SEGMENT_SETTINGS, choices=h4s3.SEGMENT_SETTINGS)
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS)
-    parser.add_argument("--seeds", type=int, nargs="+", default=h6s3.DEFAULT_SEEDS)
+    parser.add_argument("--seeds", type=int, nargs="+", default=h4s3.DEFAULT_SEEDS)
     parser.add_argument("--grid-profile", choices=["smoke", "small", "full"], default="small")
     parser.add_argument("--output-root", default="experiments/executions")
     parser.add_argument("--timestamp", default=None)
@@ -63,14 +63,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-signal-abs",
         type=float,
-        default=h6s3.DEFAULT_MAX_SIGNAL_ABS,
+        default=h4s3.DEFAULT_MAX_SIGNAL_ABS,
         help="Clip raw signal samples to +/- this value before feature extraction; use 0 to disable.",
     )
     return parser.parse_args()
 
 
 def to_builtin(value: Any) -> Any:
-    return h6s3.to_builtin(value)
+    return h4s3.to_builtin(value)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -98,7 +98,7 @@ def resolve(path: str | Path) -> Path:
 
 
 def execution_dir(output_root: Path, timestamp: str) -> Path:
-    return output_root / "H6" / "S4" / f"{timestamp}_{TOPIC}"
+    return output_root / "H4" / "S4" / f"{timestamp}_{TOPIC}"
 
 
 def timestamp_from_execution_dir(output_dir: Path) -> str:
@@ -230,12 +230,12 @@ def build_config(args: argparse.Namespace, timestamp: str, output_dir: Path, gri
             "target": "VB",
             "sensors": args.sensors,
         },
-        "segments": {"settings": args.segments, "reference": "H6_S3/H2_S1 segment feature construction"},
+        "segments": {"settings": args.segments, "reference": "H4_S3/H2_S1 segment feature construction"},
         "features": {
-            "feature_names": h6s3.FEATURE_NAMES,
+            "feature_names": h4s3.FEATURE_NAMES,
             "feature_naming": "{sensor}__{feature_name}",
             "raw_signal_sample_clip_abs": float(args.max_signal_abs),
-            "feature_value_clip_abs": float(h6s3.FEATURE_CLIP_ABS),
+            "feature_value_clip_abs": float(h4s3.FEATURE_CLIP_ABS),
         },
         "modeling": {
             "task": "VB regression",
@@ -265,13 +265,13 @@ def build_resume_signature(args: argparse.Namespace, grids: dict[str, list[dict[
         "case_scope": sorted(int(case) for case in args.case_scope),
         "sensors": list(args.sensors),
         "segments": list(args.segments),
-        "feature_names": h6s3.FEATURE_NAMES,
+        "feature_names": h4s3.FEATURE_NAMES,
         "models": list(args.models),
         "seeds": [int(seed) for seed in args.seeds],
         "grid_profile": args.grid_profile,
         "param_grids": grids,
         "max_signal_abs": float(args.max_signal_abs),
-        "feature_clip_abs": float(h6s3.FEATURE_CLIP_ABS),
+        "feature_clip_abs": float(h4s3.FEATURE_CLIP_ABS),
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     return {"signature_version": 1, "signature_sha256": digest, "payload": payload}
@@ -324,7 +324,7 @@ def completed_task_ids(metric_path: Path, resume: bool) -> set[str]:
 
 
 def find_resume_dir(output_root: Path, signature: dict[str, Any]) -> Path | None:
-    root = output_root / "H6" / "S4"
+    root = output_root / "H4" / "S4"
     if not root.exists():
         return None
     candidates = sorted(root.glob(f"*_{TOPIC}"), key=lambda path: path.stat().st_mtime, reverse=True)
@@ -363,11 +363,11 @@ def inner_cv(train: pd.DataFrame):
 
 
 def metric_dict(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
-    return h6s3.metric_dict(y_true, y_pred)
+    return h4s3.metric_dict(y_true, y_pred)
 
 
 def split_for_case(data: pd.DataFrame, target_case: int) -> pd.DataFrame:
-    return h6s3.split_for_case(data, target_case)
+    return h4s3.split_for_case(data, target_case)
 
 
 def run_grid(
@@ -380,10 +380,10 @@ def run_grid(
     output_dir: Path,
     resume: bool,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    shift_path = output_dir / "metrics" / "H6_S4_shift_metrics.csv"
-    prediction_path = output_dir / "predictions" / "H6_S4_predictions.csv"
-    split_path = output_dir / "splits" / "H6_S4_splits.csv"
-    tuning_path = output_dir / "analysis" / "H6_S4_tuning_results.csv"
+    shift_path = output_dir / "metrics" / "H4_S4_shift_metrics.csv"
+    prediction_path = output_dir / "predictions" / "H4_S4_predictions.csv"
+    split_path = output_dir / "splits" / "H4_S4_splits.csv"
+    tuning_path = output_dir / "analysis" / "H4_S4_tuning_results.csv"
     cases = sorted(feature_matrix["case_id"].unique().tolist())
     total_tasks = int(len(segments) * len(cases) * sum(len(effective_seeds_for_model(model, seeds)) for model in models))
     done = completed_task_ids(shift_path, resume)
@@ -500,14 +500,14 @@ def run_grid(
 
 
 def aggregate_metrics(shift_metrics: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    seed_metrics, segment_metrics, best_segment, case_metrics, case_segment_metrics = h6s3.aggregate_metrics(shift_metrics)
+    seed_metrics, segment_metrics, best_segment, case_metrics, case_segment_metrics = h4s3.aggregate_metrics(shift_metrics)
     best_by_model = segment_metrics.sort_values(["model", "mean_rmse"]).groupby("model", as_index=False).head(1).reset_index(drop=True)
     return seed_metrics, segment_metrics, best_segment, best_by_model, case_metrics, case_segment_metrics
 
 
 def plot_tuned_segment_effect(output_dir: Path, segment_metrics: pd.DataFrame, dpi: int) -> Path:
     fig, ax = plt.subplots(figsize=(7.6, 4.8))
-    segments = [segment for segment in h6s3.SEGMENT_SETTINGS if segment in set(segment_metrics["segment_setting"])]
+    segments = [segment for segment in h4s3.SEGMENT_SETTINGS if segment in set(segment_metrics["segment_setting"])]
     models = sorted(segment_metrics["model"].unique().tolist())
     x = np.arange(len(segments))
     width = min(0.72 / max(len(models), 1), 0.28)
@@ -523,7 +523,7 @@ def plot_tuned_segment_effect(output_dir: Path, segment_metrics: pd.DataFrame, d
     ax.grid(True, axis="y", color="#e5e7eb", linewidth=0.5)
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    path = output_dir / "figures" / "H6_S4_tuned_segment_model_effect_rmse.png"
+    path = output_dir / "figures" / "H4_S4_tuned_segment_model_effect_rmse.png"
     save_figure_dual(fig, path, dpi=dpi)
     plt.close(fig)
     return path
@@ -544,15 +544,15 @@ def write_report(output_dir: Path, summary: dict[str, Any], segment_metrics: pd.
         "",
         "## Outputs",
         "",
-        "- Feature matrix: `data/H6_S4_feature_matrix.csv`",
-        "- Parameter grids: `configs/H6_S4_param_grids.json`",
-        "- Tuning CV results: `analysis/H6_S4_tuning_results.csv`",
-        "- Shift metrics: `metrics/H6_S4_shift_metrics.csv`",
-        "- Segment metrics: `metrics/H6_S4_segment_metrics.csv`",
-        "- Case-wise metrics: `metrics/H6_S4_case_metrics.csv`",
-        "- Predictions: `predictions/H6_S4_predictions.csv`",
-        "- Progress state: `logs/H6_S4_progress_state.json`",
-        "- Figure: `figures/H6_S4_tuned_segment_model_effect_rmse.{png,svg}`",
+        "- Feature matrix: `data/H4_S4_feature_matrix.csv`",
+        "- Parameter grids: `configs/H4_S4_param_grids.json`",
+        "- Tuning CV results: `analysis/H4_S4_tuning_results.csv`",
+        "- Shift metrics: `metrics/H4_S4_shift_metrics.csv`",
+        "- Segment metrics: `metrics/H4_S4_segment_metrics.csv`",
+        "- Case-wise metrics: `metrics/H4_S4_case_metrics.csv`",
+        "- Predictions: `predictions/H4_S4_predictions.csv`",
+        "- Progress state: `logs/H4_S4_progress_state.json`",
+        "- Figure: `figures/H4_S4_tuned_segment_model_effect_rmse.{png,svg}`",
         "",
         "## Best Segment By Model",
         "",
@@ -564,17 +564,17 @@ def write_report(output_dir: Path, summary: dict[str, Any], segment_metrics: pd.
     lines.extend(["", "## Overall Ranking", "", "| rank | model | segment | mean_rmse | mean_nrmse_case_range |", "|---:|---|---|---:|---:|"])
     for row in segment_metrics.sort_values("rank_by_rmse").itertuples(index=False):
         lines.append(f"| {row.rank_by_rmse} | {row.model} | {row.segment_setting} | {row.mean_rmse:.6f} | {row.mean_nrmse_case_range:.6f} |")
-    (output_dir / "reports" / "H6_S4_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (output_dir / "reports" / "H4_S4_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     if float(args.max_signal_abs) < 0:
         raise ValueError("--max-signal-abs must be >= 0; use 0 to disable clipping.")
-    args.segments = [segment for segment in h6s3.SEGMENT_SETTINGS if segment in set(args.segments)]
+    args.segments = [segment for segment in h4s3.SEGMENT_SETTINGS if segment in set(args.segments)]
     args.models = ordered_h2_models([canonical_model_name(model) for model in args.models])
     unsupported = [model for model in args.models if model not in SUPPORTED_MODELS]
     if unsupported:
-        raise ValueError(f"H6_S4 supports {SUPPORTED_MODELS}, got unsupported models: {unsupported}")
+        raise ValueError(f"H4_S4 supports {SUPPORTED_MODELS}, got unsupported models: {unsupported}")
     args.seeds = [int(seed) for seed in args.seeds[:3]]
     grids_all = param_grids(args.grid_profile)
     grids = {model: grids_all[model] for model in args.models}
@@ -593,16 +593,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     log_progress(f"Using {'existing' if resumed else 'new'} execution directory: {output_dir}")
 
     config = build_config(args, timestamp, output_dir, grids)
-    write_yaml(output_dir / "configs" / "H6_S4_input_config.yaml", config)
-    write_json(output_dir / "configs" / "H6_S4_param_grids.json", grids)
-    write_json(output_dir / "logs" / "H6_S4_environment.json", collect_environment())
+    write_yaml(output_dir / "configs" / "H4_S4_input_config.yaml", config)
+    write_json(output_dir / "configs" / "H4_S4_param_grids.json", grids)
+    write_json(output_dir / "logs" / "H4_S4_environment.json", collect_environment())
 
     log_progress("Loading input data and applying common VB preprocessing.")
-    data, preprocessing_report = h6s3.load_dataset(args)
-    input_features = h6s3.feature_columns(args.sensors)
-    log_progress("Building H6_S3/H2_S1-style segment feature matrix.")
-    feature_matrix = h6s3.build_feature_matrix(data, args.sensors, args.segments, args.max_signal_abs)
-    feature_matrix, sanitization_report = h6s3.sanitize_feature_matrix(feature_matrix, input_features)
+    data, preprocessing_report = h4s3.load_dataset(args)
+    input_features = h4s3.feature_columns(args.sensors)
+    log_progress("Building H4_S3/H2_S1-style segment feature matrix.")
+    feature_matrix = h4s3.build_feature_matrix(data, args.sensors, args.segments, args.max_signal_abs)
+    feature_matrix, sanitization_report = h4s3.sanitize_feature_matrix(feature_matrix, input_features)
     cases = sorted(feature_matrix["case_id"].unique().tolist())
     planned_atomic = int(len(args.segments) * len(cases) * sum(len(effective_seeds_for_model(model, args.seeds)) for model in args.models))
     planned_grid_fits = int(
@@ -623,7 +623,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "grid_sizes": {model: grid_size(grids[model]) for model in args.models},
         "segments": args.segments,
         "sensors": args.sensors,
-        "feature_names": h6s3.FEATURE_NAMES,
+        "feature_names": h4s3.FEATURE_NAMES,
         "feature_columns": input_features,
         "input_feature_count": int(len(input_features)),
         "common_preprocessing": preprocessing_report,
@@ -637,12 +637,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "estimated_inner_grid_fits": planned_grid_fits,
         "dry_run": bool(args.dry_run),
     }
-    feature_matrix.to_csv(output_dir / "data" / "H6_S4_feature_matrix.csv", index=False)
-    write_json(output_dir / "analysis" / "H6_S4_common_preprocessing.json", preprocessing_report)
-    write_json(output_dir / "analysis" / "H6_S4_feature_sanitization.json", sanitization_report)
+    feature_matrix.to_csv(output_dir / "data" / "H4_S4_feature_matrix.csv", index=False)
+    write_json(output_dir / "analysis" / "H4_S4_common_preprocessing.json", preprocessing_report)
+    write_json(output_dir / "analysis" / "H4_S4_feature_sanitization.json", sanitization_report)
     if args.dry_run:
         write_progress_state(output_dir, status="dry_run_completed", total_tasks=planned_atomic, completed_tasks=0, current_task=None)
-        write_json(output_dir / "analysis" / "H6_S4_summary.json", summary)
+        write_json(output_dir / "analysis" / "H4_S4_summary.json", summary)
         log_progress(f"Dry-run completed: {planned_atomic} atomic tuning runs planned; estimated inner fits={planned_grid_fits}; no models trained.")
         return summary
 
@@ -653,16 +653,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         log_progress(f"Interrupted. Re-run the same command to resume from: {output_dir}")
         raise
     seed_metrics, segment_metrics, best_segment, best_by_model, case_metrics, case_segment_metrics = aggregate_metrics(shift_metrics)
-    shift_metrics.to_csv(output_dir / "metrics" / "H6_S4_shift_metrics.csv", index=False)
-    case_metrics.to_csv(output_dir / "metrics" / "H6_S4_case_metrics.csv", index=False)
-    case_segment_metrics.to_csv(output_dir / "metrics" / "H6_S4_case_segment_metrics.csv", index=False)
-    seed_metrics.to_csv(output_dir / "metrics" / "H6_S4_seed_metrics.csv", index=False)
-    segment_metrics.to_csv(output_dir / "metrics" / "H6_S4_segment_metrics.csv", index=False)
-    best_segment.to_csv(output_dir / "analysis" / "H6_S4_best_overall.csv", index=False)
-    best_by_model.to_csv(output_dir / "analysis" / "H6_S4_best_by_model.csv", index=False)
-    tuning_results.to_csv(output_dir / "analysis" / "H6_S4_tuning_results.csv", index=False)
-    predictions.to_csv(output_dir / "predictions" / "H6_S4_predictions.csv", index=False)
-    splits.to_csv(output_dir / "splits" / "H6_S4_splits.csv", index=False)
+    shift_metrics.to_csv(output_dir / "metrics" / "H4_S4_shift_metrics.csv", index=False)
+    case_metrics.to_csv(output_dir / "metrics" / "H4_S4_case_metrics.csv", index=False)
+    case_segment_metrics.to_csv(output_dir / "metrics" / "H4_S4_case_segment_metrics.csv", index=False)
+    seed_metrics.to_csv(output_dir / "metrics" / "H4_S4_seed_metrics.csv", index=False)
+    segment_metrics.to_csv(output_dir / "metrics" / "H4_S4_segment_metrics.csv", index=False)
+    best_segment.to_csv(output_dir / "analysis" / "H4_S4_best_overall.csv", index=False)
+    best_by_model.to_csv(output_dir / "analysis" / "H4_S4_best_by_model.csv", index=False)
+    tuning_results.to_csv(output_dir / "analysis" / "H4_S4_tuning_results.csv", index=False)
+    predictions.to_csv(output_dir / "predictions" / "H4_S4_predictions.csv", index=False)
+    splits.to_csv(output_dir / "splits" / "H4_S4_splits.csv", index=False)
     fig_path = plot_tuned_segment_effect(output_dir, segment_metrics, args.dpi)
     summary.update(
         {
@@ -675,7 +675,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "figure_path": str(fig_path.relative_to(output_dir)),
         }
     )
-    write_json(output_dir / "analysis" / "H6_S4_summary.json", summary)
+    write_json(output_dir / "analysis" / "H4_S4_summary.json", summary)
     write_report(output_dir, summary, segment_metrics, best_by_model)
     return summary
 
@@ -688,7 +688,7 @@ def main() -> None:
         print(json.dumps(to_builtin(summary), indent=2, ensure_ascii=False))
     except Exception:
         if output_dir is not None:
-            (output_dir / "logs" / "H6_S4_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (output_dir / "logs" / "H4_S4_error.log").write_text(traceback.format_exc(), encoding="utf-8")
         raise
 
 

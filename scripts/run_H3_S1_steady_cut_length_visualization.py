@@ -30,7 +30,7 @@ from milling_experiment_framework.experiment_logging.environment import collect_
 from milling_experiment_framework.visualization.figure_export import save_figure_dual
 
 
-PREFIX = "H5_S1"
+PREFIX = "H3_S1"
 TOPIC = "steady_cut_length_visualization"
 SENSOR = "smcDC"
 STEADY_LENGTH_PATHS = {
@@ -43,7 +43,7 @@ STEADY_LENGTH_PATHS = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run H5_S1 steady-cut length visualization EDA.")
+    parser = argparse.ArgumentParser(description="Run H3_S1 steady-cut length visualization EDA.")
     parser.add_argument("--signal-path", default="datasets/processed/mill_signal_data.csv")
     parser.add_argument("--output-root", default="experiments/executions")
     parser.add_argument("--timestamp", default=None)
@@ -100,7 +100,7 @@ def resolve(path: str | Path) -> Path:
 
 
 def execution_dir(output_root: Path, timestamp: str) -> Path:
-    return output_root / "H5" / "S1" / f"{timestamp}_{TOPIC}"
+    return output_root / "H3" / "S1" / f"{timestamp}_{TOPIC}"
 
 
 def make_dirs(output_dir: Path) -> None:
@@ -308,7 +308,7 @@ def build_boundary_table(metadata: dict[int, pd.DataFrame]) -> pd.DataFrame:
 
 
 def write_report(output_dir: Path, summary: dict[str, Any]) -> None:
-    report = f"""# H5_S1 Steady-cut Length Visualization
+    report = f"""# H3_S1 Steady-cut Length Visualization
 
 ## Scope
 
@@ -320,15 +320,15 @@ def write_report(output_dir: Path, summary: dict[str, Any]) -> None:
 
 ## Output
 
-- Boundary table: `data/H5_S1_steady_cut_boundaries.csv`
-- Figure manifest: `analysis/H5_S1_figure_manifest.csv`
-- Summary: `analysis/H5_S1_summary.json`
+- Boundary table: `data/H3_S1_steady_cut_boundaries.csv`
+- Figure manifest: `analysis/H3_S1_figure_manifest.csv`
+- Summary: `analysis/H3_S1_summary.json`
 
 ## Notes
 
 Each panel plots the full `{SENSOR}` signal and shades no-load, entry, steady, and exit/tail regions. The green shaded interval is the steady-cut segment for the requested length.
 """
-    (output_dir / "reports" / "H5_S1_report.md").write_text(report, encoding="utf-8")
+    (output_dir / "reports" / "H3_S1_report.md").write_text(report, encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -340,8 +340,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     make_dirs(output_dir)
 
     config = build_config(args, timestamp, output_dir)
-    write_yaml(output_dir / "configs" / "H5_S1_input_config.yaml", config)
-    write_json(output_dir / "logs" / "H5_S1_environment.json", collect_environment())
+    write_yaml(output_dir / "configs" / "H3_S1_input_config.yaml", config)
+    write_json(output_dir / "logs" / "H3_S1_environment.json", collect_environment())
 
     metadata = load_metadata()
     signal = load_signals(resolve(args.signal_path))
@@ -353,7 +353,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"Missing signal rows: {missing_signal.head().to_dict(orient='records')}")
 
     boundary_table = build_boundary_table(metadata)
-    boundary_table.to_csv(output_dir / "data" / "H5_S1_steady_cut_boundaries.csv", index=False)
+    boundary_table.to_csv(output_dir / "data" / "H3_S1_steady_cut_boundaries.csv", index=False)
 
     summary = {
         "experiment_id": config["experiment"]["experiment_id"],
@@ -366,7 +366,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "figure_count": 0,
     }
     if args.dry_run:
-        write_json(output_dir / "analysis" / "H5_S1_summary.json", summary)
+        write_json(output_dir / "analysis" / "H3_S1_summary.json", summary)
         write_report(output_dir, summary)
         return summary
 
@@ -380,12 +380,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         manifest.append({"case": case, "run": run_id, "figure_path": str(figure_path.relative_to(output_dir))})
 
     manifest_df = pd.DataFrame(manifest).sort_values(["case", "run"])
-    manifest_df.to_csv(output_dir / "analysis" / "H5_S1_figure_manifest.csv", index=False)
+    manifest_df.to_csv(output_dir / "analysis" / "H3_S1_figure_manifest.csv", index=False)
     case_counts = manifest_df.groupby("case", as_index=False).size().rename(columns={"size": "figure_count"})
-    case_counts.to_csv(output_dir / "analysis" / "H5_S1_case_figure_counts.csv", index=False)
+    case_counts.to_csv(output_dir / "analysis" / "H3_S1_case_figure_counts.csv", index=False)
     summary["figure_count"] = int(len(manifest_df))
     summary["figures_by_case"] = {int(row.case): int(row.figure_count) for row in case_counts.itertuples(index=False)}
-    write_json(output_dir / "analysis" / "H5_S1_summary.json", summary)
+    write_json(output_dir / "analysis" / "H3_S1_summary.json", summary)
     write_report(output_dir, summary)
     return summary
 
@@ -399,7 +399,7 @@ def main() -> None:
         print(json.dumps(to_builtin(summary), indent=2, ensure_ascii=False))
     except Exception:
         if output_dir is not None:
-            (output_dir / "logs" / "H5_S1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (output_dir / "logs" / "H3_S1_error.log").write_text(traceback.format_exc(), encoding="utf-8")
         raise
 
 
