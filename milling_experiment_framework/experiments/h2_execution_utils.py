@@ -4,13 +4,25 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
 from milling_experiment_framework.core.config import stable_hash
 from milling_experiment_framework.experiments.execution_path import current_timestamp
 from milling_experiment_framework.models.h2_regressors import canonical_model_name
+
+
+@dataclass(frozen=True)
+class S1RunConfig:
+    """Run-configuration for H2-family feature-based VB prediction experiments."""
+
+    process_info_path: Path
+    signal_data_path: Path
+    heuristic_sequence_path: Path
+    seeds: list[int]
+    models: list[str]
+    model_params: dict[str, dict[str, Any]]
 
 
 NO_SEED = -1

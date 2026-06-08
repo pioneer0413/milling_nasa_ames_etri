@@ -28,18 +28,20 @@ from torch.utils.data import DataLoader, Dataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from milling_experiment_framework.datasets.mill_constants import (
+    CASE_DOMAINS,
+    CASE_SCOPE,
+    DOMAIN_CASES,
+    EXCLUDED_CASES,
+    SHIFT_SCENARIOS,
+    TRAIN_CASE_GROUPS,
+)
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiments.execution_path import create_execution_dir
 from milling_experiment_framework.models.dl.hybrid_lstm_process import HybridLSTMProcessRegressor
 
 
 PREFIX = "H3_S2"
-CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-EXCLUDED_CASES = [6]
-CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
-TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
-DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
-SHIFT_SCENARIOS = [(f"train_without_case_{case}", f"case_{case}") for case in CASE_SCOPE]
 EXPECTED_SENSORS = ["smcAC", "smcDC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"]
 SENSOR_GROUPS = {
     "current": ["smcAC", "smcDC"],

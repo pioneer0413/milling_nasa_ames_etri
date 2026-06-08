@@ -36,12 +36,15 @@ from milling_experiment_framework.models.dl.cumulative_descriptor import Cumulat
 from milling_experiment_framework.models.dl.stacking_meta_learner import RidgeAdaBoostStackingRegressor
 
 
+from milling_experiment_framework.datasets.mill_constants import (
+    CASE_DOMAINS,
+    CASE_SCOPE,
+    DOMAIN_CASES,
+    EXCLUDED_CASES,
+    TRAIN_CASE_GROUPS,
+)
+
 PREFIX = "H3_S3"
-CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-EXCLUDED_CASES = [6]
-CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
-TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
-DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
 SHIFT_SCENARIOS = [f"train_without_case_{case}_to_case_{case}" for case in CASE_SCOPE]
 EXPECTED_SENSORS = ["smcAC", "smcDC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"]
 SENSOR_GROUPS = {

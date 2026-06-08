@@ -17,17 +17,19 @@ from milling_experiment_framework.experiment_logging.environment import collect_
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
 from milling_experiment_framework.experiments.execution_path import execution_index_fields
 from milling_experiment_framework.reports.report_generator import generate_report
+from milling_experiment_framework.datasets.mill_constants import (
+    CASE_DOMAINS,
+    CASE_SCOPE,
+    DOMAIN_CASES,
+    EXCLUDED_CASES,
+    SHIFT_SCENARIOS,
+    SIGNAL_COLUMNS,
+    TRAIN_CASE_GROUPS,
+)
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
 
-CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-EXCLUDED_CASES = [6]
-CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
-TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
-DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
-SHIFT_SCENARIOS = [(f"train_without_case_{case}", f"case_{case}") for case in CASE_SCOPE]
-SIGNAL_COLUMNS = ["smcAC", "smcDC", "vib_table", "vib_spindle", "AE_table", "AE_spindle"]
 PROCESS_FEATURES = ["time", "DOC", "feed", "material"]
 
 

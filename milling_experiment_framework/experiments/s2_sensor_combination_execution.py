@@ -4,7 +4,6 @@ import json
 import math
 import traceback
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -12,33 +11,31 @@ import pandas as pd
 
 from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
-from milling_experiment_framework.experiment_logging.environment import collect_environment
-from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
-from milling_experiment_framework.experiments.execution_path import execution_index_fields
-from milling_experiment_framework.experiments.h2_execution_utils import (
-    concat_existing_new,
-    atomic_signature,
-    effective_seeds_for_model,
-    existing_run_signatures,
-    model_seed_value,
-    ModelProgressReporter,
-    ordered_h2_models,
-    planned_atomic_count,
-    print_runtime_estimate_and_confirm,
-    read_existing_csv,
-    reusable_h2_experiment_id,
-    seed_label,
-)
-from milling_experiment_framework.experiments.s1_segment_execution import (
+from milling_experiment_framework.datasets.mill_constants import (
     CASE_SCOPE,
     DOMAIN_CASES,
     FEATURE_NAMES,
     SEGMENT_SETTINGS,
     SHIFT_SCENARIOS,
-    S1RunConfig,
-    S1SegmentExecution,
 )
-from milling_experiment_framework.models.h2_regressors import h2_model_catalog, resolve_h2_model_defaults
+from milling_experiment_framework.experiment_logging.environment import collect_environment
+from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
+from milling_experiment_framework.experiments.base_execution import BaseH2Execution
+from milling_experiment_framework.experiments.h2_execution_utils import (
+    S1RunConfig,
+    atomic_signature,
+    concat_existing_new,
+    effective_seeds_for_model,
+    existing_run_signatures,
+    model_seed_value,
+    ModelProgressReporter,
+    planned_atomic_count,
+    print_runtime_estimate_and_confirm,
+    read_existing_csv,
+    seed_label,
+)
+from milling_experiment_framework.experiments.s1_segment_execution import S1SegmentExecution
+from milling_experiment_framework.models.h2_regressors import h2_model_catalog
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
@@ -60,16 +57,13 @@ SENSOR_COMBINATIONS = {
 SINGLE_GROUPS = {"current", "vibration", "acoustic"}
 
 
-class S2SensorCombinationExecution:
+class S2SensorCombinationExecution(BaseH2Execution):
     """Run S2 segment-aware VB prediction over fixed sensor group combinations."""
 
-    def __init__(self, config_path: str | Path, root: str | Path = ".", dry_run: bool = False, seed_mode: str = "initial", assume_yes: bool = False):
-        self.config_path = Path(config_path)
-        self.root = Path(root).resolve()
-        self.dry_run = dry_run
-        self.seed_mode = seed_mode
-        self.assume_yes = assume_yes
-        self.skipped: list[dict[str, Any]] = []
+    _scenario_id = "S2"
+    _experiment_topic = "sensor_combination_effect_segment_aware_VB_prediction"
+    _index_name = "S2_sensor_combination_effect_on_segment_aware_VB_prediction"
+    _index_steady_cut = "segmentation_no_noload"
 
     def run(self) -> dict[str, Any]:
         raw_config = self._read_config()
@@ -129,41 +123,6 @@ class S2SensorCombinationExecution:
             self._update_index(config, "failed", None, str(exc), str(paths.execution_dir / "logs" / "error.log"))
             raise
 
-    def _read_config(self) -> dict[str, Any]:
-        import yaml
-
-        with self.config_path.open("r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-
-    def _resolve_run_config(self, config: dict[str, Any]) -> S1RunConfig:
-        seed_list = config.get("seeds", {}).get("seed_list", list(range(20)))
-        if self.seed_mode == "initial":
-            seeds = config.get("seeds", {}).get("initial_seeds", [0, 1, 2])
-        elif self.seed_mode == "extra":
-            seeds = config.get("seeds", {}).get("extra_seeds", [s for s in seed_list if s not in {0, 1, 2}])
-        elif self.seed_mode == "all":
-            seeds = seed_list
-        else:
-            seeds = [int(s) for s in self.seed_mode.split(",") if s.strip()]
-        model_cfg = config.get("model_defaults", {})
-        return S1RunConfig(
-            process_info_path=Path(config["dataset"]["process_info_path"]),
-            signal_data_path=Path(config["dataset"]["signal_data_path"]),
-            heuristic_sequence_path=Path(config["dataset"]["heuristic_sequence_path"]),
-            seeds=[int(seed) for seed in seeds],
-            models=ordered_h2_models(config.get("models", ["random_forest", "mlp"])),
-            model_params=resolve_h2_model_defaults(model_cfg),
-        )
-
-    def _generate_experiment_id(self) -> str:
-        return reusable_h2_experiment_id(
-            self.root,
-            scenario_id="S2",
-            topic="sensor_combination_effect_segment_aware_VB_prediction",
-            dry_run=self.dry_run,
-            seed_mode=self.seed_mode,
-        )
-
     def _resolved_config(self, raw_config: dict[str, Any], run_config: S1RunConfig, experiment_id: str) -> dict[str, Any]:
         config = dict(raw_config)
         config["experiment"] = dict(config.get("experiment", {}))
@@ -187,13 +146,6 @@ class S2SensorCombinationExecution:
         config["scaling_policy"] = "StandardScaler fit on train split only for all H2 feature-based model pipelines"
         config["config_hash"] = stable_hash(config)
         return config
-
-    def _validate_inputs(self, run_config: S1RunConfig) -> dict[str, Any]:
-        errors = []
-        for path in [run_config.process_info_path, run_config.signal_data_path, run_config.heuristic_sequence_path]:
-            if not path.exists():
-                errors.append(f"Missing required file: {path}")
-        return {"ok": not errors, "errors": errors, "warnings": []}
 
     def _sensor_group_mapping(self, sensors: list[str]) -> pd.DataFrame:
         rows = []
@@ -867,28 +819,3 @@ Evaluate whether sensor group combinations improve segment-aware VB prediction u
     def _best_metric(self, metrics: pd.DataFrame) -> float | None:
         return None if metrics.empty else float(metrics["mean_mae"].min())
 
-    def _update_index(self, config: dict[str, Any], status: str, best_metric: float | None, error_message: str | None = None, error_log: str | None = None) -> None:
-        index_path = self.root / "experiments" / "index.csv"
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        row = {
-            "experiment_id": config["experiment"]["experiment_id"],
-            **execution_index_fields(config),
-            "experiment_name": "S2_sensor_combination_effect_on_segment_aware_VB_prediction",
-            "dataset": "mill_processed_enabled",
-            "model": "random_forest,mlp",
-            "input_type": "feature-based",
-            "split_strategy": "leave_one_case_out_no_validation",
-            "steady_cut_mode": "segmentation_no_noload",
-            "status": status,
-            "best_metric": best_metric,
-            "created_at": config["experiment"]["created_at"],
-            "error_message": error_message,
-            "error_log": error_log,
-        }
-        if index_path.exists():
-            frame = pd.read_csv(index_path)
-            frame = frame.loc[frame["experiment_id"] != row["experiment_id"]]
-            frame = pd.concat([frame, pd.DataFrame([row])], ignore_index=True)
-        else:
-            frame = pd.DataFrame([row])
-        frame.to_csv(index_path, index=False)

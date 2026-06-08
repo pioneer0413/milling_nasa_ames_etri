@@ -5,7 +5,6 @@ import json
 import math
 import traceback
 import warnings
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,58 +18,39 @@ from milling_experiment_framework import __version__
 from milling_experiment_framework.core.config import SCHEMA_VERSION, stable_hash
 from milling_experiment_framework.experiment_logging.environment import collect_environment
 from milling_experiment_framework.experiment_logging.experiment_logger import ExperimentLogger
-from milling_experiment_framework.experiments.execution_path import execution_index_fields
+from milling_experiment_framework.experiments.base_execution import BaseH2Execution
 from milling_experiment_framework.experiments.h2_execution_utils import (
+    S1RunConfig,
     concat_existing_new,
     atomic_signature,
     effective_seeds_for_model,
     existing_run_signatures,
     model_seed_value,
     ModelProgressReporter,
-    ordered_h2_models,
     planned_atomic_count,
     print_runtime_estimate_and_confirm,
     read_existing_csv,
-    reusable_h2_experiment_id,
     seed_label,
 )
 from milling_experiment_framework.models.h2_regressors import (
     create_h2_feature_pipeline,
     h2_model_catalog,
-    resolve_h2_model_defaults,
+)
+from milling_experiment_framework.datasets.mill_constants import (
+    CASE_SCOPE,
+    CASE_DOMAINS,
+    DOMAIN_CASES,
+    EXCLUDED_CASES,
+    FEATURE_NAMES,
+    SEGMENT_SETTINGS,
+    SHIFT_SCENARIOS,
+    TRAIN_CASE_GROUPS,
 )
 from milling_experiment_framework.utils.io import write_csv, write_json, write_yaml
 from milling_experiment_framework.utils.paths import ExperimentPaths
 
 
-CASE_SCOPE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-EXCLUDED_CASES = [6]
-CASE_DOMAINS = {f"case_{case}": [case] for case in CASE_SCOPE}
-TRAIN_CASE_GROUPS = {f"train_without_case_{case}": [other for other in CASE_SCOPE if other != case] for case in CASE_SCOPE}
-DOMAIN_CASES = {**CASE_DOMAINS, **TRAIN_CASE_GROUPS}
-SHIFT_SCENARIOS = [(f"train_without_case_{case}", f"case_{case}") for case in CASE_SCOPE]
-SEGMENT_SETTINGS = [
-    "full_length",
-    "steady",
-    "entry",
-    "exit",
-    "entry_steady",
-    "entry_exit",
-    "steady_exit",
-    "entry_steady_exit",
-]
 SENSOR_SETTING = "all_sensors"
-FEATURE_NAMES = [
-    "mean",
-    "std",
-    "max",
-    "min",
-    "peak_to_peak",
-    "kurtosis",
-    "skewness",
-    "band_energy",
-    "spectral_centroid",
-]
 METRIC_COLUMNS = {
     "mae": "metric_mae",
     "rmse": "metric_rmse",
@@ -80,33 +60,13 @@ METRIC_COLUMNS = {
 }
 
 
-@dataclass(frozen=True)
-class S1RunConfig:
-    process_info_path: Path
-    signal_data_path: Path
-    heuristic_sequence_path: Path
-    seeds: list[int]
-    models: list[str]
-    model_params: dict[str, dict[str, Any]]
-
-
-class S1SegmentExecution:
+class S1SegmentExecution(BaseH2Execution):
     """Execute S1 segment-setting effect experiment with leave-one-case-out testing."""
 
-    def __init__(
-        self,
-        config_path: str | Path,
-        root: str | Path = ".",
-        dry_run: bool = False,
-        seed_mode: str = "initial",
-        assume_yes: bool = False,
-    ):
-        self.config_path = Path(config_path)
-        self.root = Path(root).resolve()
-        self.dry_run = dry_run
-        self.seed_mode = seed_mode
-        self.assume_yes = assume_yes
-        self.skipped: list[dict[str, Any]] = []
+    _scenario_id = "S1"
+    _experiment_topic = "segment_setting_effect_all_sensors_all_features_VB_prediction"
+    _index_name = "S1_segment_setting_effect_on_VB_prediction"
+    _index_steady_cut = "segmentation"
 
     def run(self) -> dict[str, Any]:
         raw_config = self._read_config()
@@ -161,42 +121,6 @@ class S1SegmentExecution:
             (paths.execution_dir / "logs" / "error.log").write_text(error_text, encoding="utf-8")
             self._update_index(resolved_config, status="failed", best_metric=None, error_message=str(exc), error_log=str(paths.execution_dir / "logs" / "error.log"))
             raise
-
-    def _read_config(self) -> dict[str, Any]:
-        import yaml
-
-        with self.config_path.open("r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-
-    def _resolve_run_config(self, config: dict[str, Any]) -> S1RunConfig:
-        seed_list = config.get("seeds", {}).get("seed_list", list(range(20)))
-        if self.seed_mode == "initial":
-            seeds = config.get("seeds", {}).get("initial_seeds", [0, 1, 2])
-        elif self.seed_mode == "extra":
-            seeds = config.get("seeds", {}).get("extra_seeds", [s for s in seed_list if s not in {0, 1, 2}])
-        elif self.seed_mode == "all":
-            seeds = seed_list
-        else:
-            seeds = [int(s) for s in self.seed_mode.split(",") if s.strip()]
-        models = ordered_h2_models(config.get("models", ["random_forest", "mlp"]))
-        model_cfg = config.get("model_defaults", {})
-        return S1RunConfig(
-            process_info_path=Path(config["dataset"]["process_info_path"]),
-            signal_data_path=Path(config["dataset"]["signal_data_path"]),
-            heuristic_sequence_path=Path(config["dataset"]["heuristic_sequence_path"]),
-            seeds=[int(seed) for seed in seeds],
-            models=models,
-            model_params=resolve_h2_model_defaults(model_cfg),
-        )
-
-    def _generate_experiment_id(self) -> str:
-        return reusable_h2_experiment_id(
-            self.root,
-            scenario_id="S1",
-            topic="segment_setting_effect_all_sensors_all_features_VB_prediction",
-            dry_run=self.dry_run,
-            seed_mode=self.seed_mode,
-        )
 
     def _resolved_config(self, raw_config: dict[str, Any], run_config: S1RunConfig, experiment_id: str) -> dict[str, Any]:
         resolved = dict(raw_config)
@@ -955,39 +879,6 @@ H1.S1 association reference unavailable. RQ4 is deferred.
         if segment_metrics.empty:
             return None
         return float(segment_metrics["mean_mae"].min())
-
-    def _update_index(
-        self,
-        config: dict[str, Any],
-        status: str,
-        best_metric: float | None,
-        error_message: str | None = None,
-        error_log: str | None = None,
-    ) -> None:
-        index_path = self.root / "experiments" / "index.csv"
-        index_path.parent.mkdir(parents=True, exist_ok=True)
-        row = {
-            "experiment_id": config["experiment"]["experiment_id"],
-            **execution_index_fields(config),
-            "experiment_name": "S1_segment_setting_effect_on_VB_prediction",
-            "dataset": "mill_processed_enabled",
-            "model": "random_forest,mlp",
-            "input_type": "feature-based",
-            "split_strategy": "leave_one_case_out_no_validation",
-            "steady_cut_mode": "segmentation",
-            "status": status,
-            "best_metric": best_metric,
-            "created_at": config["experiment"].get("created_at"),
-            "error_message": error_message,
-            "error_log": error_log,
-        }
-        if index_path.exists():
-            frame = pd.read_csv(index_path)
-            frame = frame.loc[frame["experiment_id"] != row["experiment_id"]]
-            frame = pd.concat([frame, pd.DataFrame([row])], ignore_index=True)
-        else:
-            frame = pd.DataFrame([row])
-        frame.to_csv(index_path, index=False)
 
     def _assert_no_leakage_features(self, feature_columns: list[str]) -> None:
         forbidden = {"VB", "label", "y", "target"}
