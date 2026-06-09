@@ -1,9 +1,0 @@
-[
-  {
-    "warning_level": "HIGH",
-    "warning_code": "STACKING_SUBRUNS",
-    "message": "stacking/OOF model has many sub-runs per atomic execution",
-    "affected_phase": "all",
-    "suggested_action": "Profile one condition and run reduced grid first."
-  }
-]

@@ -1,7 +1,0 @@
-phase,condition_group,model,atomic_executions,total_sub_runs,estimated_sec_per_atomic,estimated_total_sec,estimated_total_min,estimated_total_hours,runtime_estimation_method,assumption
-full,default,cumulative_s_dnn,882,18522,600.0,529200.0,8820.0,147.0,config_runtime_per_atomic,estimation.runtime_per_atomic_sec.cumulative_s_dnn
-initial,default,cumulative_s_dnn,882,18522,600.0,529200.0,8820.0,147.0,config_runtime_per_atomic,estimation.runtime_per_atomic_sec.cumulative_s_dnn
-extra_seed,default,cumulative_s_dnn,294,6174,600.0,176400.0,2940.0,49.0,config_runtime_per_atomic,estimation.runtime_per_atomic_sec.cumulative_s_dnn
-smoke,default,cumulative_s_dnn,1,21,600.0,600.0,10.0,0.16666666666666666,config_runtime_per_atomic,estimation.runtime_per_atomic_sec.cumulative_s_dnn
-reduced,default,cumulative_s_dnn,216,4536,600.0,129600.0,2160.0,36.0,config_runtime_per_atomic,estimation.runtime_per_atomic_sec.cumulative_s_dnn
-optional_ablation,default,cumulative_s_dnn,882,18522,600.0,529200.0,8820.0,147.0,config_runtime_per_atomic,estimation.runtime_per_atomic_sec.cumulative_s_dnn

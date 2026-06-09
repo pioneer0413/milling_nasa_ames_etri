@@ -1,7 +1,0 @@
-phase,condition_group,model,mode,input_representation,n_shifts,n_seeds,n_models,n_sensor_combinations,n_segment_settings,n_feature_combinations,n_process_combinations,n_base_learners,n_folds,atomic_executions,sub_runs_per_atomic,total_sub_runs,notes
-full,default,cumulative_s_dnn,s_dnn,cumulative,6,3,1,7,7,1,1,4,5,882,21,18522,
-initial,default,cumulative_s_dnn,s_dnn,cumulative,6,3,1,7,7,1,1,4,5,882,21,18522,
-extra_seed,default,cumulative_s_dnn,s_dnn,cumulative,6,1,1,7,7,1,1,4,5,294,21,6174,
-smoke,default,cumulative_s_dnn,s_dnn,cumulative,1,1,1,1,1,1,1,4,5,1,21,21,
-reduced,default,cumulative_s_dnn,s_dnn,cumulative,6,3,1,4,3,1,1,4,5,216,21,4536,
-optional_ablation,default,cumulative_s_dnn,s_dnn,cumulative,6,3,1,7,7,1,1,4,5,882,21,18522,
