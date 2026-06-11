@@ -234,3 +234,16 @@ Scenario context: `docs/agent_context/scenario_context/H4_S3_context.md`
 | T1   | Entry+Steady+Exit    | SVR 0.122         |
 | T2   | Entry+Steady         | XGB 0.129         |
 | T3   | Steady only          | XGB 0.126         |
+
+# Alarm
+- 작업 완료 후 알람 요청을 메세지 마지막에 추가한 경우 아래와 같이 진행한다.
+```
+"방금 수행한 작업을 한국어 한 문장으로 요약해서 <작업 내용>에 넣어 보내라" curl -s ntfy.sh/hwkang_07836 -d "<작업 내용>"
+```
+
+# Experiment Process
+- 실험 프로세스 진행 요청 시 아래 단계로 진행한다.
+1. 실험을 수행한다.
+2. 실험이 완료되면, 채팅에 실험 결과를 요약하여 출력한다.
+3. Notion-MCP를 통해 실험 결과를 Notion에 기록한다.
+4. ntfy를 통해 실험 완료 알람을 보낸다.
