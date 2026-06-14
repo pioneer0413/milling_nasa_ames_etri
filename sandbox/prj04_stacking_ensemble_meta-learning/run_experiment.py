@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """prj04 stacking-ensemble + meta-learner — LOCV @100%, 5 seeds.
 
-Base learners = ONLY the ML models present in leader_board/H4_case_model_top5.csv:
+Base learners = ONLY the ML models present in leaderboards/h4/per_case/top5.csv:
     Ridge, SVR, RandomForest, XGBoost, MLP   (feature_gru is DL -> excluded)
 Meta-learner stacks the 5 base predictions into the final VB.
 

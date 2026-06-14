@@ -7,14 +7,14 @@
 
 ## 0. 작업 요청 (verbatim)
 
-> prj04_stacking_ensemble_meta-learning에서는 @leader_board/H4_case_model_top5.csv 에 있는 ML 모델만을 사용해서 stacking-ensemble을 구성해. 그리고 마지막에 meta-learner를 사용해서 최종 VB를 예측하는 모델을 만들어. 그것도 입력 100%, 5-seed LOCV로 실험 후 결과를 보고해.
+> prj04_stacking_ensemble_meta-learning에서는 @leaderboards/h4/per_case/top5.csv 에 있는 ML 모델만을 사용해서 stacking-ensemble을 구성해. 그리고 마지막에 meta-learner를 사용해서 최종 VB를 예측하는 모델을 만들어. 그것도 입력 100%, 5-seed LOCV로 실험 후 결과를 보고해.
 
 ---
 
 ## 1. 구성
 
 ### Base learners — leaderboard의 ML 모델만
-`H4_case_model_top5.csv`의 `model_type==ML`에 등장하는 5개 모델만 사용 (DL인 `feature_gru`는 제외):
+`leaderboards/h4/per_case/top5.csv`의 `model_type==ML`에 등장하는 5개 모델만 사용 (DL인 `feature_gru`는 제외):
 
 | Base learner | 설정 |
 | --- | --- |

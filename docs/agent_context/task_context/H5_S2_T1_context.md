@@ -10,7 +10,7 @@
 - 그 외 설정은 H4_S1_T4와 동일
 
 # Experiment Scope
-- H4_case_model_top5.csv에서 Case 13, 14의 Top-5 조합만 실험 (Case 13/14만 holdout)
+- `leaderboards/h4/per_case/top5.csv`에서 Case 13, 14의 Top-5 조합만 실험 (Case 13/14만 holdout)
 - 센서 제거 외 모든 조건 동일하게 유지하여 vib 제거 효과만 분리
 
 ## Case 13 (holdout): feature_gru, Delta(16)+Meta(3), prefix

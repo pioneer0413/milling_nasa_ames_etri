@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""prj07 — Faithful 5x reproduction & aggregation of every H4_case_model_top5 row.
+"""prj07 — Faithful 5x reproduction & aggregation of every H4 per-case top-5 row.
 
 For each of the 80 leaderboard rows we reproduce the EXACT original experiment
 by importing the original H4 script module (scripts/run_H4_*.py) and calling its
@@ -145,7 +145,7 @@ def run_cell(task, mod, feat, mscript, pct):
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    lb = pd.read_csv(ROOT / "leader_board" / "H4_case_model_top5.csv")
+    lb = pd.read_csv(ROOT / "leaderboards" / "h4" / "per_case" / "top5.csv")
     lb["task_key"] = lb["scenario"] + "_" + lb["task"]
     print(f"Leaderboard rows: {len(lb)}  | device={DEVICE}  | seeds={SEEDS}\n", flush=True)
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """H5_S2_T4: Multi-seed statistical significance for per-case Top-1 models
 
-For each case, take the Top-1 model+configuration from H4 leaderboard
-(H4_case_model_top5.csv) and run with 5 random seeds (0–4).
+For each case, take the Top-1 model+configuration from the H4 per-case
+leaderboard (`leaderboards/h4/per_case/top5.csv`) and run with 5 random
+seeds (0–4).
 Deterministic models (SVR, Ridge) are included with their H4 seed=0 result.
 
 Sources:
@@ -62,7 +63,7 @@ META_COLS     = ["DOC", "feed", "material"]
 THRESH        = 1e6
 SEEDS         = [0, 1, 2, 3, 4]
 
-# Per-case Top-1 configuration (from H4_case_model_top5.csv, case_rank=1)
+# Per-case Top-1 configuration (from leaderboards/h4/per_case/top5.csv, case_rank=1)
 TOP1 = {
     1:  {"model": "xgboost",      "feature": "raw+delta+meta", "pct": 80.0,  "scenario": "s3_noload",    "deterministic": False,
          "h4": {"rmse": 0.044626, "r2": 0.919187, "mae": 0.039144}},

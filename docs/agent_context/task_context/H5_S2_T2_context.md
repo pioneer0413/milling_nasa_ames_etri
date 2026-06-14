@@ -19,7 +19,7 @@
 - 최종 예측: VB_pred = model_output(VB_ratio) × predicted_VB_max
 
 # Experiment Scope
-- H4_case_model_top5.csv에서 Case 13, 14의 Top-5 조합만 실험 (T1과 동일 범위)
+- `leaderboards/h4/per_case/top5.csv`에서 Case 13, 14의 Top-5 조합만 실험 (T1과 동일 범위)
 - VB 정규화 외 모든 조건 동일
 
 ## Case 13 (holdout): feature_gru, Delta(24)+Meta(3)=27, prefix
