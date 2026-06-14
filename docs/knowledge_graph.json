@@ -1,0 +1,247 @@
+{
+  "title": "NASA Milling Tool Wear Prediction - Project Knowledge Graph",
+  "last_updated": "2026-06-12",
+  "nodes": {
+    "dataset": {
+      "name": "NASA Ames Milling Dataset",
+      "cases": 16,
+      "active_cases": 15,
+      "excluded_cases": [6],
+      "excluded_runs": ["Case2-Run1", "Case12-Run1"],
+      "total_runs": 167,
+      "sensors": ["smcAC", "smcDC", "vib_spindle", "vib_table", "AE_spindle", "AE_table"],
+      "target": "VB (flank wear, mm)",
+      "task": "Leave-One-Case-Out Cross Validation (LOCV)"
+    },
+    "valid_rmse_per_case": {
+      "source": "H1_S8: NASA Vibration Deep EDA (2026-06-11)",
+      "definition": "mean adjacent absolute delta VB (interpolated): 인접 런 간 VB 측정 해상도. RMSE가 이 값 이하이면 모델이 측정 해상도 이내로 예측하는 '유효 예측' 달성",
+      "artifact": "experiments/executions/H1/S8/2026-06-11_144336_nasa_vibration_deep_eda/analysis/H1_S8_case_effective_vb_resolution.csv",
+      "per_case": {
+        "1":  {"valid_rmse": 0.03625, "vb_range": [0.0, 0.5],  "n_runs": 17},
+        "2":  {"valid_rmse": 0.03615, "vb_range": [0.08, 0.55], "n_runs": 14},
+        "3":  {"valid_rmse": 0.04231, "vb_range": [0.0, 0.55],  "n_runs": 14},
+        "4":  {"valid_rmse": 0.06833, "vb_range": [0.08, 0.49], "n_runs": 7},
+        "5":  {"valid_rmse": 0.148,   "vb_range": [0.0, 0.74],  "n_runs": 6},
+        "6":  {"valid_rmse": null,    "vb_range": [0.0, 0.0],   "n_runs": 1, "note": "excluded: 1 run only"},
+        "7":  {"valid_rmse": 0.07667, "vb_range": [0.0, 0.46],  "n_runs": 8},
+        "8":  {"valid_rmse": 0.124,   "vb_range": [0.0, 0.62],  "n_runs": 6},
+        "9":  {"valid_rmse": 0.10125, "vb_range": [0.0, 0.81],  "n_runs": 9},
+        "10": {"valid_rmse": 0.07778, "vb_range": [0.0, 0.7],   "n_runs": 10},
+        "11": {"valid_rmse": 0.03455, "vb_range": [0.0, 0.76],  "n_runs": 23},
+        "12": {"valid_rmse": 0.04643, "vb_range": [0.0, 0.65],  "n_runs": 15},
+        "13": {"valid_rmse": 0.10929, "vb_range": [0.0, 1.53],  "n_runs": 15, "note": "hard case: high VB range"},
+        "14": {"valid_rmse": 0.1425,  "vb_range": [0.0, 1.14],  "n_runs": 9,  "note": "hard case: high VB range"},
+        "15": {"valid_rmse": 0.11667, "vb_range": [0.0, 0.7],   "n_runs": 7},
+        "16": {"valid_rmse": 0.124,   "vb_range": [0.0, 0.62],  "n_runs": 6}
+      },
+      "global_mean_adj_delta_vb": 0.0741,
+      "global_median_adj_delta_vb": 0.05
+    },
+    "best_gru": {
+      "model": "Feature-sequence GRU (DeltaMetaGRU)",
+      "experiment": "H4_S5 diagnostics",
+      "config": "head32 (hidden=256, layers=3, dropout=0.1, head_hidden=32, lr=1e-3, cosine, epochs=200)",
+      "features": "Delta(24) + Meta(3) = 27",
+      "input_strategy": "prefix 80%",
+      "seeds": [0, 1, 2],
+      "overall_locv_rmse": 0.08992,
+      "artifact": "experiments/executions/H4/S5/2026-06-10_152134_feature_gru_best_diagnostics",
+      "per_case_rmse": {
+        "1":  0.24261, "2":  0.10137, "3":  0.03581, "4":  0.10991,
+        "5":  0.05045, "7":  0.06606, "8":  0.12802, "9":  0.07998,
+        "10": 0.05084, "11": 0.03188, "12": 0.16869, "13": 0.11007,
+        "14": 0.08821, "15": 0.04073, "16": 0.04413
+      },
+      "valid_cases": [3, 5, 7, 9, 10, 11, 14, 15, 16],
+      "invalid_cases": [1, 2, 4, 8, 12, 13],
+      "n_valid": 9,
+      "n_total": 15,
+      "notes": {
+        "case13": "경계: 0.11007 vs valid_rmse 0.10929 (초과 0.00078mm)",
+        "case8": "경계: 0.12802 vs valid_rmse 0.124 (초과 0.00402mm)"
+      }
+    },
+    "best_xgboost": {
+      "model": "XGBoost",
+      "experiment": "H4_S9 HPO (xgb_hpo_all)",
+      "config": "g_lr0.03_n600_d3_mcw8 (lr=0.03, n_estimators=600, max_depth=3, min_child_weight=8)",
+      "features": "Delta(24) + Meta(3) = 27",
+      "input_strategy": "prefix 100%",
+      "seeds": [0, 1, 2],
+      "overall_locv_rmse": 0.10402,
+      "artifact": "experiments/executions/H4/S9/2026-06-11_113620_xgb_hpo_all",
+      "per_case_rmse": {
+        "1":  0.07838, "2":  0.07651, "3":  0.03861, "4":  0.08588,
+        "5":  0.05971, "7":  0.05633, "8":  0.14309, "9":  0.07851,
+        "10": 0.08103, "11": 0.09397, "12": 0.15801, "13": 0.26240,
+        "14": 0.14965, "15": 0.07362, "16": 0.12466
+      },
+      "valid_cases": [3, 5, 7, 9, 15],
+      "invalid_cases": [1, 2, 4, 8, 10, 11, 12, 13, 14, 16],
+      "n_valid": 5,
+      "n_total": 15,
+      "notes": {
+        "case14": "경계: 0.14965 vs valid_rmse 0.1425 (초과 0.00715mm)",
+        "case16": "경계: 0.12466 vs valid_rmse 0.124 (초과 0.00066mm)",
+        "case10": "경계: 0.08103 vs valid_rmse 0.07778 (초과 0.00325mm)"
+      }
+    },
+    "valid_rmse_comparison": {
+      "updated": "2026-06-12",
+      "gru_vs_xgb_summary": {
+        "gru_valid": 9,
+        "xgb_valid": 5,
+        "both_valid": [3, 5, 7, 9, 15],
+        "gru_only_valid": [10, 11, 14, 16],
+        "xgb_only_valid": [],
+        "neither_valid": [1, 2, 4, 8, 12, 13]
+      },
+      "case_detail": {
+        "1":  {"valid_rmse": 0.03625, "gru_rmse": 0.24261, "xgb_rmse": 0.07838, "gru_ok": false, "xgb_ok": false},
+        "2":  {"valid_rmse": 0.03615, "gru_rmse": 0.10137, "xgb_rmse": 0.07651, "gru_ok": false, "xgb_ok": false},
+        "3":  {"valid_rmse": 0.04231, "gru_rmse": 0.03581, "xgb_rmse": 0.03861, "gru_ok": true,  "xgb_ok": true},
+        "4":  {"valid_rmse": 0.06833, "gru_rmse": 0.10991, "xgb_rmse": 0.08588, "gru_ok": false, "xgb_ok": false},
+        "5":  {"valid_rmse": 0.148,   "gru_rmse": 0.05045, "xgb_rmse": 0.05971, "gru_ok": true,  "xgb_ok": true},
+        "7":  {"valid_rmse": 0.07667, "gru_rmse": 0.06606, "xgb_rmse": 0.05633, "gru_ok": true,  "xgb_ok": true},
+        "8":  {"valid_rmse": 0.124,   "gru_rmse": 0.12802, "xgb_rmse": 0.14309, "gru_ok": false, "xgb_ok": false},
+        "9":  {"valid_rmse": 0.10125, "gru_rmse": 0.07998, "xgb_rmse": 0.07851, "gru_ok": true,  "xgb_ok": true},
+        "10": {"valid_rmse": 0.07778, "gru_rmse": 0.05084, "xgb_rmse": 0.08103, "gru_ok": true,  "xgb_ok": false},
+        "11": {"valid_rmse": 0.03455, "gru_rmse": 0.03188, "xgb_rmse": 0.09397, "gru_ok": true,  "xgb_ok": false},
+        "12": {"valid_rmse": 0.04643, "gru_rmse": 0.16869, "xgb_rmse": 0.15801, "gru_ok": false, "xgb_ok": false},
+        "13": {"valid_rmse": 0.10929, "gru_rmse": 0.11007, "xgb_rmse": 0.26240, "gru_ok": false, "xgb_ok": false},
+        "14": {"valid_rmse": 0.1425,  "gru_rmse": 0.08821, "xgb_rmse": 0.14965, "gru_ok": true,  "xgb_ok": false},
+        "15": {"valid_rmse": 0.11667, "gru_rmse": 0.04073, "xgb_rmse": 0.07362, "gru_ok": true,  "xgb_ok": true},
+        "16": {"valid_rmse": 0.124,   "gru_rmse": 0.04413, "xgb_rmse": 0.12466, "gru_ok": true,  "xgb_ok": false}
+      },
+      "key_findings": [
+        "GRU가 9/15 케이스에서 유효 RMSE 달성 (XGBoost: 5/15)",
+        "GRU가 XGBoost보다 우월한 케이스: Case 10, 11, 14, 16 (GRU만 유효)",
+        "XGBoost가 GRU보다 우월한 케이스: 없음",
+        "두 모델 모두 달성: Case 3, 5, 7, 9, 15 (5개)",
+        "두 모델 모두 실패(핵심 병목): Case 1, 2, 4, 8, 12, 13",
+        "Case 1(RMSE=0.243)이 전체 평균을 최대로 끌어올리는 단일 최대 이상치",
+        "Case 13은 GRU 경계(0.11007 vs 0.10929, diff=+0.00078) — 거의 유효",
+        "Case 8은 GRU 경계(0.12802 vs 0.124, diff=+0.00402) — 아슬아슬"
+      ]
+    },
+    "project_goals": {
+      "goal1": {"description": "전체 LOCV RMSE ≤ 0.080 (3-seed, ≤80% prefix)", "current_best": 0.08992, "status": "미달성", "gap": 0.00992},
+      "goal2": {"description": "전체 LOCV RMSE ≤ 0.090 (3-seed, ≤80% prefix)", "current_best": 0.08992, "status": "거의 달성", "gap": -0.00008}
+    },
+    "case1_case12_difficulty_analysis": {
+      "experiment": "H7_S1 (2026-06-12)",
+      "artifact": "experiments/executions/H7/S1/2026-06-12_134037_case1_case12_difficulty_analysis",
+      "script": "scripts/run_H7_S1_case1_case12_difficulty_analysis.py",
+      "case_1": {
+        "root_cause": "non_monotone_vb_trajectory",
+        "vb_trajectory": {
+          "is_monotone": false,
+          "n_decrease_pairs": 3,
+          "vb_peak": 0.50,
+          "vb_peak_run": 15,
+          "vb_final": 0.44,
+          "vb_final_run": 17,
+          "peak_to_final_drop": 0.06,
+          "note": "유일한 non-monotone 케이스. VB가 run 15(0.50)에서 run 17(0.44)로 역전"
+        },
+        "delta_baseline": {
+          "baseline_run": 1,
+          "vb_at_baseline": 0.0,
+          "note": "정상 — Run 1(VB=0.0) 기준"
+        },
+        "prediction_bias": {
+          "direction": "overestimate",
+          "mean_bias": 0.1844,
+          "early_half_mae": 0.0462,
+          "late_half_mae": 0.3273,
+          "pattern": "초기 런(1-8)에서는 작은 오차, 후반 런(9-17)에서 폭발적 과대추정. run 17 error=0.547"
+        },
+        "gru_vs_xgb": {
+          "gru_rmse": 0.2426,
+          "xgb_rmse": 0.0784,
+          "ratio": 3.10,
+          "note": "GRU가 XGBoost 대비 3.1배 나쁨 — sequence 모델이 단조증가 패턴을 학습하여 VB 역전 시 파국적 실패"
+        },
+        "prefix_sweep_case1_only": {
+          "best_prefix": 80,
+          "best_rmse": 0.2427,
+          "range_50_90": "0.34-0.43 (80%가 유일한 spike)",
+          "note": "Case 1에서도 80%가 local minimum이나 여전히 0.24로 유효 threshold(0.036) 6.7배 초과"
+        },
+        "feature_vb_correlation": {
+          "mean_abs_corr": 0.8423,
+          "top_features": ["smcAC__delta_rms", "smcAC__delta_std", "smcAC__delta_peak"],
+          "note": "피처-VB 상관은 강함 → 피처 정보력 문제 아님. GRU의 sequence 학습 메커니즘이 원인"
+        },
+        "ood_check": {
+          "condition": {"DOC": 1.5, "feed": 0.5, "material": "cast_iron"},
+          "training_analogs": [9],
+          "is_ood": false,
+          "note": "Case 9가 동일 조건으로 훈련셋에 존재. OOD 아님"
+        },
+        "fix_candidates": [
+          "VB monotone enforcement: 예측값이 감소할 수 없도록 후처리 제약 추가",
+          "Non-monotone-aware loss: VB 역전 패턴을 학습할 수 있는 손실 함수",
+          "Case 1 특화 모델: non-monotone 케이스를 별도 처리"
+        ]
+      },
+      "case_12": {
+        "root_cause": "delta_baseline_distribution_mismatch",
+        "vb_trajectory": {
+          "is_monotone": true,
+          "vb_peak": 0.65,
+          "vb_final": 0.65,
+          "note": "VB 궤적 자체는 정상 단조증가"
+        },
+        "delta_baseline": {
+          "baseline_run": 2,
+          "vb_at_baseline": 0.05,
+          "excluded_run_1": true,
+          "note": "Run 1이 EXCLUDED_RUNS에 포함 → Delta 기준이 Run 2(VB=0.05mm). 훈련 케이스 대부분은 Run 1(VB≈0) 기준. 체계적 분포 편이 발생"
+        },
+        "prediction_bias": {
+          "direction": "overestimate",
+          "mean_bias": 0.1409,
+          "early_half_mae": 0.0731,
+          "late_half_mae": 0.2111,
+          "pattern": "단조 과대추정. 런이 진행될수록 오차 증가"
+        },
+        "gru_vs_xgb": {
+          "gru_rmse": 0.1687,
+          "xgb_rmse": 0.1580,
+          "ratio": 1.07,
+          "note": "GRU/XGB 비율 1.07 — 두 모델이 거의 동등하게 실패. 피처 분포 편이가 원인임을 확인"
+        },
+        "prefix_sweep_case12_only": {
+          "best_prefix": 82,
+          "best_rmse": 0.1477,
+          "note": "82-86% 구간이 가장 낮으나 valid threshold(0.046)에는 3배 초과"
+        },
+        "feature_vb_correlation": {
+          "mean_abs_corr": 0.8169,
+          "top_features": ["smcAC__delta_rms", "smcAC__delta_std", "smcDC__delta_rms"],
+          "note": "피처-VB 상관 강함 → 피처 정보력 문제 아님. Delta baseline 편이가 원인"
+        },
+        "ood_check": {
+          "condition": {"DOC": 0.75, "feed": 0.5, "material": "cast_iron"},
+          "training_analogs": [2],
+          "is_ood": false,
+          "note": "Case 2가 동일 조건으로 훈련셋에 존재. OOD 아님. 단 Case 2도 Run 1 excluded(VB=0.14) → 같은 문제"
+        },
+        "fix_candidates": [
+          "Delta baseline correction: Case 12의 Delta 피처를 VB=0.05 offset 보정",
+          "VB-normalized Delta: Delta 계산 시 baseline VB로 정규화하여 훈련/테스트 일관성 확보",
+          "Run 1 신호 복원 시도: Case 12 Run 1 신호가 있다면 EXCLUDED_RUNS에서 제외하고 Delta 기준으로 사용"
+        ]
+      },
+      "shared_findings": {
+        "non_monotone_cases_in_dataset": [1],
+        "excluded_run1_cases": [2, 12],
+        "case_2_also_affected": "Case 2도 Run 1 excluded(VB_baseline=0.14mm), GRU RMSE=0.101 실패 — Case 12와 동일 메커니즘",
+        "gru_sequence_model_weakness": "GRU는 시계열 패턴 학습 강점이 있으나 VB 역전(non-monotone) 시 후반 런에서 오차 폭발",
+        "feature_informativeness": "두 케이스 모두 피처-VB 상관이 높음(0.82-0.84) — 피처 정보력 부족이 아닌 구조적 문제"
+      }
+    }
+  }
+}
