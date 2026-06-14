@@ -1,18 +1,23 @@
-# H4 Case-wise Model Leader Board
+# H4 Per-Case Leaderboard
 
 각 H4 task의 최신 실행 결과에서 case별 RMSE 최저 조합을 정리했습니다. T0/S2 예비·시각화 결과는 제외하고 S1 T1-T8, S3 T1-T4를 포함했습니다.
 
 ## Files
-- `H4_case_model_leader_board.csv`: case별 1위 조합
-- `H4_case_model_top5.csv`: case별 상위 5개 후보
-- `H4_case_model_winner_summary.csv`: model/task 조합별 승리 case 요약
-- `H4_case_model_all_results.csv`: 정규화된 전체 후보 row
+- `winners.csv`: case별 1위 조합
+- `top5.csv`: case별 상위 5개 후보
+- `winner_summary.csv`: model/task 조합별 승리 case 요약
+- `all_results.csv`: 정규화된 전체 후보 row
+- `input_length_histogram.md`: top-5 후보의 input length 분포 요약
+- `input_length_histogram_counts.csv`: input length 분포 수치
+- `figures/input_length_histogram.png`: histogram figure
+- `figures/input_length_histogram.svg`: vector version of the histogram
 
 ## Related Heatmap
-- `H4_model_input_ratio_best_rmse_heatmap.png`: model x input signal ratio best RMSE heatmap
-- `H4_model_input_ratio_best_rmse_heatmap.svg`: vector version of the heatmap
-- `H4_model_input_ratio_best_rmse_matrix.csv`: heatmap cell values
-- `H4_model_input_ratio_best_rmse_sources.csv`: source task/config selected for each heatmap cell
+- `../input_ratio/README.md`: model x input signal ratio best RMSE heatmap summary
+- `../input_ratio/best_rmse_matrix.csv`: heatmap cell values
+- `../input_ratio/best_rmse_sources.csv`: source task/config selected for each heatmap cell
+- `../input_ratio/figures/best_rmse_heatmap.png`: heatmap figure
+- `../input_ratio/figures/best_rmse_heatmap.svg`: vector version of the heatmap
 
 ## Used Latest Runs
 - H4_S1_T1: `2026-06-08_161302_H4_S1_T1_input_signal_length_effect`

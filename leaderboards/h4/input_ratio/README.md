@@ -2,10 +2,10 @@
 
 각 셀은 해당 모델과 입력 신호 비중에서 가능한 H4 설정 중 가장 낮은 aggregate mean RMSE를 사용합니다. 낮은 RMSE일수록 밝은 색으로 표시했습니다.
 
-- Figure PNG: `H4_model_input_ratio_best_rmse_heatmap.png`
-- Figure SVG: `H4_model_input_ratio_best_rmse_heatmap.svg`
-- Matrix CSV: `H4_model_input_ratio_best_rmse_matrix.csv`
-- Cell source CSV: `H4_model_input_ratio_best_rmse_sources.csv`
+- Figure PNG: `figures/best_rmse_heatmap.png`
+- Figure SVG: `figures/best_rmse_heatmap.svg`
+- Matrix CSV: `best_rmse_matrix.csv`
+- Cell source CSV: `best_rmse_sources.csv`
 
 ## Used Latest Runs
 - H4_S1_T1: 2026-06-08_161302_H4_S1_T1_input_signal_length_effect

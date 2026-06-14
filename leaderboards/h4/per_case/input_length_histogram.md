@@ -1,9 +1,9 @@
 # H4 Case Model Top-5 Input Length Histogram
 
-- Source: `leader_board/H4_case_model_top5.csv`
-- PNG: `H4_case_model_top5_input_length_histogram.png`
-- SVG: `H4_case_model_top5_input_length_histogram.svg`
-- Counts: `H4_case_model_top5_input_length_histogram_counts.csv`
+- Source: `top5.csv`
+- PNG: `figures/input_length_histogram.png`
+- SVG: `figures/input_length_histogram.svg`
+- Counts: `input_length_histogram_counts.csv`
 
 ## Counts
 
