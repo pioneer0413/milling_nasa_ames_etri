@@ -9,6 +9,7 @@ Experiment leaderboard artifacts are grouped by experiment family and comparison
 - `h4/per_case/figures/`: figures derived from per-case rankings.
 - `h4/input_ratio/`: model x input-ratio best-RMSE matrix and heatmap sources.
 - `h4/input_ratio/figures/`: heatmap image exports.
+- `h12/s1/`: H12 S1 input ratio sweep results for H11 top-1 sensor subset configs.
 - `archive/`: legacy backups retained for reference.
 
 ## Naming
