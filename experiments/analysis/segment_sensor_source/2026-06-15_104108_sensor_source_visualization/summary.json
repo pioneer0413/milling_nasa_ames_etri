@@ -1,0 +1,26 @@
+{
+  "created_at": "2026-06-15_104108",
+  "detector_config": {
+    "window": 256,
+    "hop": 16,
+    "min_fraction": 0.65,
+    "max_fraction": 0.985,
+    "threshold_quantile": 0.97,
+    "threshold_mad_multiplier": 5.0,
+    "min_tail": 384,
+    "rms_weight": 0.4
+  },
+  "sensors": [
+    "smcDC",
+    "smcAC",
+    "vib_table",
+    "vib_spindle",
+    "AE_table",
+    "AE_spindle"
+  ],
+  "dataset_outputs": "/home/hwkang/manufacturing_data_exercise/02_milling_v2/datasets/cutting_segment_v2/sensor_source",
+  "analysis_output": "/home/hwkang/manufacturing_data_exercise/02_milling_v2/experiments/analysis/segment_sensor_source/2026-06-15_104108_sensor_source_visualization",
+  "legacy_reference": "/home/hwkang/manufacturing_data_exercise/02_milling_v2/datasets/cutting_segment_v2/seg_reverse_kurtosis_smcDC.csv",
+  "base_segment": "/home/hwkang/manufacturing_data_exercise/02_milling_v2/datasets/cutting_segment/seg_peng2026_steady5.csv",
+  "note": "idx_end in merged files is overwritten by each source sensor's detected idx_exit_start when has_exit=True."
+}

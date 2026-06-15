@@ -26,7 +26,7 @@ H11에서 발견한 최적 센서 부분집합 구성에 대해 input_length_pct
 
 ## Key Findings
 
-- **GRU**: 80% already optimal (H11_S3_T1 baseline confirmed). 90-100% slightly worse.
+- **GRU**: 80% is the numerical optimum (H11_S3_T1 baseline confirmed), but this is late for realistic deployment because most of the cutting signal has already been observed. RMSE increases again on both sides of 80%: earlier prefixes lack enough wear progression signal, while 90-100% adds late-stage noise/instability rather than improving the sequence model.
 - **XGBoost**: 90% best (-5.1% vs H11_S1_T1 100% baseline). 100% input adds noise.
 - Both models show non-monotonic response — sweet spot at 60-90%.
 

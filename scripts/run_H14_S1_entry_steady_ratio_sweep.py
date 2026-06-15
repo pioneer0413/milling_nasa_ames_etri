@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""H13_S1: Input segment sweep for H11/H12 top-1 sensor subset configurations.
+"""H14_S1: Input ratio sweep within the Entry_Steady segment.
+
+H13_S1에서 Entry_Steady가 최적 segment로 확인됨.
+Entry_Steady 구간 [noload_end : idx_end] 내에서 ratio r%만큼 사용:
+  [noload_end : noload_end + ceil((idx_end - noload_end) * r / 100)]
 
 T1: Feature-GRU — AC+vT+vS (mask=13), Delta+Meta (15-dim)
-    Baseline: prefix=80% → RMSE=0.081977 (H11_S3_T1)
+    Baselines: H13_S1_T1 ES-100%=0.087225, H11_S3_T1 prefix-80%=0.081977
 T2: XGBoost    — AC+vS   (mask= 9), Delta+Meta (11-dim)
-    Baseline: prefix=90% → RMSE=0.103660 (H12_S1_T2)
+    Baselines: H13_S1_T2 ES-100%=0.105912, H12_S1_T2 prefix-90%=0.103660
 
-Segment tasks (applied uniformly to all runs, including delta reference):
-  Excl_Exit:    [0 : idx_end]              No-load+Entry+Steady
-  Entry_Steady: [idx_noload_end : idx_end]  Entry+Steady
-  Steady:       [idx_start : idx_end]       Steady only
-  Full:         [0 : signal_end]            Full signal (prefix=100%, control)
-
-Runs without segment labels fall back to Full for all tasks.
+Sweep: ratio ∈ {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}%
 Protocol: LOCV (15 cases), seeds=[0,1,2], observed_vb eval
 
-Output: experiments/executions/H13/S1/{timestamp}_input_segment_sweep/
+Output: experiments/executions/H14/S1/{timestamp}_entry_steady_ratio_sweep/
 """
 from __future__ import annotations
 
@@ -52,6 +50,7 @@ NON_OBSERVED_RUNS = {
 }
 META_FEATURES = ["DOC", "feed", "material"]
 SEEDS         = [0, 1, 2]
+RATIOS        = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 THRESH        = 1e6
 N_SENSORS     = len(SENSORS)
 
@@ -59,15 +58,10 @@ GRU_MASK = 13   # AC+vT+vS
 XGB_MASK = 9    # AC+vS
 
 BASELINES = {
-    "gru": {"label": "H11_S3_T1 prefix=80%", "rmse": 0.081977},
-    "xgb": {"label": "H12_S1_T2 prefix=90%", "rmse": 0.103660},
-}
-
-SEGMENTS = {
-    "Excl_Exit":    "No-load+Entry+Steady  [0 : idx_end]",
-    "Entry_Steady": "Entry+Steady          [noload_end : idx_end]",
-    "Steady":       "Steady only           [idx_start : idx_end]",
-    "Full":         "Full signal           [0 : signal_end]  (control)",
+    "gru_es100":    {"label": "H13_S1_T1 ES-100%",    "rmse": 0.087225},
+    "gru_prefix80": {"label": "H11_S3_T1 prefix-80%", "rmse": 0.081977},
+    "xgb_es100":    {"label": "H13_S1_T2 ES-100%",    "rmse": 0.105912},
+    "xgb_prefix90": {"label": "H12_S1_T2 prefix-90%", "rmse": 0.103660},
 }
 
 SEG_CSV = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
@@ -119,28 +113,15 @@ def mask_label(mask: int) -> str:
     return "+".join(SENSOR_ABBR[SENSORS[i]] for i in range(N_SENSORS) if (mask >> i) & 1)
 
 
-def segment_bounds(seg_task: str, seg: dict, base_len: int) -> tuple[int, int]:
-    if seg_task == "Excl_Exit":
-        return 0, min(int(seg["idx_end"]), base_len)
-    if seg_task == "Entry_Steady":
-        start = min(int(seg["idx_noload_end"]), base_len)
-        end   = min(int(seg["idx_end"]), base_len)
-        return start, max(start + 1, end)
-    if seg_task == "Steady":
-        start = min(int(seg["idx_start"]), base_len)
-        end   = min(int(seg["idx_end"]), base_len)
-        return start, max(start + 1, end)
-    return 0, base_len   # Full
-
-
-# ─── Multi-segment feature cache ──────────────────────────────────────────────
-def build_segment_cache(
+# ─── Multi-ratio cache (Entry_Steady window) ──────────────────────────────────
+def build_es_ratio_cache(
     signal_df: pd.DataFrame,
     proc_clean: pd.DataFrame,
     seg_idx: dict[tuple[int, int], dict],
-) -> tuple[dict[tuple[int, int, str], np.ndarray], dict[int, int]]:
-    """cache[(case, run, seg_task)] = 24-dim all-sensor feature vector."""
-    cache: dict[tuple[int, int, str], np.ndarray] = {}
+    ratios: list[int],
+) -> tuple[dict[tuple[int, int, int], np.ndarray], dict[int, int]]:
+    """cache[(case, run, pct)] = 24-dim feature for Entry_Steady[:pct%]."""
+    cache: dict[tuple[int, int, int], np.ndarray] = {}
 
     for row in proc_clean.itertuples(index=False):
         case_id, run_id = int(row.case), int(row.run)
@@ -152,41 +133,51 @@ def build_segment_cache(
         if any(np.abs(a).max() > THRESH for a in arrays.values()):
             continue
         base_len = min(len(a) for a in arrays.values())
-        seg = seg_idx.get((case_id, run_id))
 
-        for seg_task in SEGMENTS:
-            if seg is None or seg_task == "Full":
-                s, e = 0, base_len
-            else:
-                s, e = segment_bounds(seg_task, seg, base_len)
-            feats = np.concatenate([extract_features(arrays[sn][s:e]) for sn in SENSORS])
-            cache[(case_id, run_id, seg_task)] = feats
+        seg = seg_idx.get((case_id, run_id))
+        if seg is None:
+            # No segment label: use prefix of full signal as fallback
+            for pct in ratios:
+                end = max(1, int(np.ceil(base_len * pct / 100.0)))
+                feats = np.concatenate([extract_features(arrays[s][:end]) for s in SENSORS])
+                cache[(case_id, run_id, pct)] = feats
+        else:
+            es_start = min(int(seg["idx_noload_end"]), base_len)
+            es_end   = min(int(seg["idx_end"]), base_len)
+            es_len   = max(1, es_end - es_start)
+            for pct in ratios:
+                cut = max(1, int(np.ceil(es_len * pct / 100.0)))
+                end = min(es_start + cut, base_len)
+                feats = np.concatenate(
+                    [extract_features(arrays[s][es_start:end]) for s in SENSORS]
+                )
+                cache[(case_id, run_id, pct)] = feats
 
     first_run: dict[int, int] = {}
     for case_id in proc_clean["case"].unique():
-        runs = sorted(r for (c, r, t) in cache if c == case_id and t == "Full")
+        runs = sorted(r for (c, r, p) in cache if c == case_id and p == ratios[0])
         if runs:
             first_run[int(case_id)] = runs[0]
     return cache, first_run
 
 
-# ─── GRU data builder ─────────────────────────────────────────────────────────
+# ─── GRU sequence builder ─────────────────────────────────────────────────────
 def build_gru_sequences(
-    cache: dict[tuple[int, int, str], np.ndarray],
+    cache: dict[tuple[int, int, int], np.ndarray],
     first_run: dict[int, int],
     proc_clean: pd.DataFrame,
     mask: int,
-    seg_task: str,
+    pct: int,
 ) -> dict[int, dict]:
     sensor_indices = mask_sensor_indices(mask)
     case_rows: dict[int, list[dict]] = {c: [] for c in CASE_SCOPE}
     for row in proc_clean.itertuples(index=False):
         case_id, run_id = int(row.case), int(row.run)
-        key = (case_id, run_id, seg_task)
+        key = (case_id, run_id, pct)
         if key not in cache:
             continue
         ref_run = first_run.get(case_id, run_id)
-        ref_vec = cache.get((case_id, ref_run, seg_task), np.zeros(N_SENSORS * 4))
+        ref_vec = cache.get((case_id, ref_run, pct), np.zeros(N_SENSORS * 4))
         delta = (cache[key] - ref_vec)[sensor_indices]
         if not np.all(np.isfinite(delta)):
             delta = np.where(np.isfinite(delta), delta, 0.0)
@@ -252,8 +243,7 @@ def fit_predict_gru(
     train_seqs = [info["seq"] for info in train_cases.values()]
     train_vbs  = [info["vb"]  for info in train_cases.values()]
     all_vb = np.concatenate(train_vbs)
-    y_mean = float(all_vb.mean())
-    y_std  = max(float(all_vb.std()), 1e-8)
+    y_mean, y_std = float(all_vb.mean()), max(float(all_vb.std()), 1e-8)
 
     tensors = [torch.tensor(s, dtype=torch.float32) for s in train_seqs]
     lengths = torch.tensor([len(s) for s in train_seqs])
@@ -306,23 +296,23 @@ def run_gru_locv(
     return float(np.mean(rmses)) if rmses else float("nan")
 
 
-# ─── XGB data builder ─────────────────────────────────────────────────────────
+# ─── XGB data / LOCV ──────────────────────────────────────────────────────────
 def build_xgb_df(
-    cache: dict[tuple[int, int, str], np.ndarray],
+    cache: dict[tuple[int, int, int], np.ndarray],
     first_run: dict[int, int],
     proc_clean: pd.DataFrame,
     mask: int,
-    seg_task: str,
+    pct: int,
 ) -> pd.DataFrame:
     sensor_indices = mask_sensor_indices(mask)
     rows: list[dict] = []
     for row in proc_clean.itertuples(index=False):
         case_id, run_id = int(row.case), int(row.run)
-        key = (case_id, run_id, seg_task)
+        key = (case_id, run_id, pct)
         if key not in cache:
             continue
         ref_run = first_run.get(case_id, run_id)
-        ref_vec = cache.get((case_id, ref_run, seg_task), np.zeros(N_SENSORS * 4))
+        ref_vec = cache.get((case_id, ref_run, pct), np.zeros(N_SENSORS * 4))
         delta   = (cache[key] - ref_vec)[sensor_indices]
         if not np.all(np.isfinite(delta)):
             delta = np.where(np.isfinite(delta), delta, 0.0)
@@ -359,46 +349,38 @@ def run_xgb_locv(feat_df: pd.DataFrame, feature_cols: list[str], seed: int) -> f
 
 
 # ─── Plot ─────────────────────────────────────────────────────────────────────
-def plot_segment_bar(
+def plot_ratio_curve(
     gru_results: list[dict],
     xgb_results: list[dict],
     out_path: Path,
 ) -> None:
-    seg_labels = [r["segment"] for r in gru_results]
-    x = np.arange(len(seg_labels))
-    width = 0.35
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    gru_means = [r["mean_rmse"] for r in gru_results]
-    xgb_means = [r["mean_rmse"] for r in xgb_results]
-    gru_stds  = [r["std_rmse"]  for r in gru_results]
-    xgb_stds  = [r["std_rmse"]  for r in xgb_results]
-
-    bars1 = ax.bar(x - width/2, gru_means, width, yerr=gru_stds, capsize=4,
-                   color="steelblue", alpha=0.85, label="GRU AC+vT+vS")
-    bars2 = ax.bar(x + width/2, xgb_means, width, yerr=xgb_stds, capsize=4,
-                   color="darkorange", alpha=0.85, label="XGB AC+vS")
-
-    ax.axhline(BASELINES["gru"]["rmse"], color="steelblue", linestyle="--", linewidth=1.2,
-               label=f"GRU baseline (prefix 80%): {BASELINES['gru']['rmse']:.4f}")
-    ax.axhline(BASELINES["xgb"]["rmse"], color="darkorange", linestyle="--", linewidth=1.2,
-               label=f"XGB baseline (prefix 90%): {BASELINES['xgb']['rmse']:.4f}")
-
-    ax.set_xlabel("Input Segment")
-    ax.set_ylabel("Observed-VB RMSE (3-seed mean)")
-    ax.set_title("H13_S1: Input Segment Sweep — H11/H12 Top-1 Configs")
-    ax.set_xticks(x)
-    ax.set_xticklabels(seg_labels, rotation=10)
-    ax.legend(fontsize=8)
-    ax.grid(True, axis="y", alpha=0.3)
-
-    for bar, mean in zip(bars1, gru_means):
-        ax.text(bar.get_x() + bar.get_width()/2, mean + 0.002, f"{mean:.4f}",
-                ha="center", va="bottom", fontsize=7, color="steelblue")
-    for bar, mean in zip(bars2, xgb_means):
-        ax.text(bar.get_x() + bar.get_width()/2, mean + 0.002, f"{mean:.4f}",
-                ha="center", va="bottom", fontsize=7, color="darkorange")
-
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    configs = [
+        (axes[0], gru_results, "Feature-GRU (AC+vT+vS)", "steelblue",
+         BASELINES["gru_es100"], BASELINES["gru_prefix80"]),
+        (axes[1], xgb_results, "XGBoost (AC+vS)", "darkorange",
+         BASELINES["xgb_es100"], BASELINES["xgb_prefix90"]),
+    ]
+    for ax, results, label, color, bl_es, bl_prefix in configs:
+        pcts  = [r["pct"]      for r in results]
+        means = [r["mean_rmse"] for r in results]
+        stds  = [r["std_rmse"]  for r in results]
+        ax.errorbar(pcts, means, yerr=stds, marker="o", capsize=4,
+                    color=color, label=label, linewidth=1.8)
+        ax.axhline(bl_es["rmse"], color="gray", linestyle="--", linewidth=1.2,
+                   label=f"ES-100% baseline: {bl_es['rmse']:.4f}")
+        ax.axhline(bl_prefix["rmse"], color="black", linestyle=":", linewidth=1.2,
+                   label=f"Prefix best baseline: {bl_prefix['rmse']:.4f}")
+        best = min(results, key=lambda r: r["mean_rmse"])
+        ax.axvline(best["pct"], color="crimson", linestyle=":", linewidth=1.2,
+                   label=f"Best={best['pct']}%  RMSE={best['mean_rmse']:.4f}")
+        ax.set_xlabel("Entry_Steady ratio (%)")
+        ax.set_ylabel("Observed-VB RMSE (3-seed mean)")
+        ax.set_title(label)
+        ax.set_xticks(pcts)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+    fig.suptitle("H14_S1: Entry_Steady Ratio Sweep", fontsize=13)
     plt.tight_layout()
     fig.savefig(str(out_path.with_suffix(".png")), dpi=150, bbox_inches="tight")
     fig.savefig(str(out_path.with_suffix(".svg")), bbox_inches="tight")
@@ -408,7 +390,7 @@ def plot_segment_bar(
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = ROOT / "experiments" / "executions" / "H13" / "S1" / f"{ts}_input_segment_sweep"
+    out_dir = ROOT / "experiments" / "executions" / "H14" / "S1" / f"{ts}_entry_steady_ratio_sweep"
     for sub in ["metrics", "figures", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -419,12 +401,14 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H13_S1: Input Segment Sweep for H11/H12 Top-1 Configs ===")
-    log(f"T1: Feature-GRU  mask={GRU_MASK} ({mask_label(GRU_MASK)})  "
-        f"baseline={BASELINES['gru']['rmse']}")
-    log(f"T2: XGBoost      mask={XGB_MASK} ({mask_label(XGB_MASK)})  "
-        f"baseline={BASELINES['xgb']['rmse']}")
-    log(f"Segments: {list(SEGMENTS.keys())}, Seeds={SEEDS}, LOCV={len(CASE_SCOPE)} cases")
+    log("=== H14_S1: Entry_Steady Ratio Sweep ===")
+    log(f"T1: GRU  mask={GRU_MASK} ({mask_label(GRU_MASK)})  "
+        f"ES-100% baseline={BASELINES['gru_es100']['rmse']}, "
+        f"prefix-80% baseline={BASELINES['gru_prefix80']['rmse']}")
+    log(f"T2: XGB  mask={XGB_MASK} ({mask_label(XGB_MASK)})  "
+        f"ES-100% baseline={BASELINES['xgb_es100']['rmse']}, "
+        f"prefix-90% baseline={BASELINES['xgb_prefix90']['rmse']}")
+    log(f"Ratios={RATIOS}, Seeds={SEEDS}, LOCV={len(CASE_SCOPE)} cases")
 
     log("\nLoading data...")
     signal_df  = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv",
@@ -449,112 +433,110 @@ def main() -> None:
                     if (int(r.case), int(r.run)) in seg_idx)
     log(f"Segment-labeled runs: {n_labeled}/{len(proc_clean)}")
 
-    log("Building segment feature cache...")
-    cache, first_run = build_segment_cache(signal_df, proc_clean, seg_idx)
-    log(f"Cache size: {len(cache)} entries ({len(proc_clean)} runs × {len(SEGMENTS)} tasks)")
+    log(f"Building Entry_Steady ratio cache (ratios={RATIOS})...")
+    cache, first_run = build_es_ratio_cache(signal_df, proc_clean, seg_idx, RATIOS)
+    log(f"Cache size: {len(cache)} ({len(proc_clean)} runs × {len(RATIOS)} ratios)")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"Device: {device}")
 
-    # ── T1: Feature-GRU sweep ─────────────────────────────────────────────────
+    # ── T1: GRU sweep ─────────────────────────────────────────────────────────
     gru_n_sensors = bin(GRU_MASK).count("1")
     gru_input_dim = gru_n_sensors * 4 + len(META_FEATURES)
     log(f"\n--- T1: Feature-GRU  input_dim={gru_input_dim}  ({mask_label(GRU_MASK)}) ---")
     gru_results: list[dict] = []
     t0 = time_mod.time()
 
-    for seg_task, seg_desc in SEGMENTS.items():
-        all_cases = build_gru_sequences(cache, first_run, proc_clean, GRU_MASK, seg_task)
-        seed_rmses: list[float] = []
-        for seed in SEEDS:
-            rmse = run_gru_locv(all_cases, gru_input_dim, device, seed)
-            seed_rmses.append(rmse)
-        mean_rmse = float(np.mean(seed_rmses))
-        std_rmse  = float(np.std(seed_rmses))
-        gru_results.append({"segment": seg_task, "desc": seg_desc,
-                            "mean_rmse": mean_rmse, "std_rmse": std_rmse,
+    for pct in RATIOS:
+        all_cases = build_gru_sequences(cache, first_run, proc_clean, GRU_MASK, pct)
+        seed_rmses = [run_gru_locv(all_cases, gru_input_dim, device, s) for s in SEEDS]
+        mean_rmse  = float(np.mean(seed_rmses))
+        std_rmse   = float(np.std(seed_rmses))
+        gru_results.append({"pct": pct, "mean_rmse": mean_rmse, "std_rmse": std_rmse,
                             "seed_rmses": seed_rmses})
-        delta = mean_rmse - BASELINES["gru"]["rmse"]
-        log(f"  GRU {seg_task:<15}  RMSE={mean_rmse:.6f}  std={std_rmse:.6f}"
-            f"  Δbaseline={delta:+.6f}  [{time_mod.time()-t0:.0f}s]")
+        log(f"  GRU ES-ratio={pct:3d}%  RMSE={mean_rmse:.6f}  std={std_rmse:.6f}"
+            f"  Δ(ES100)={mean_rmse-BASELINES['gru_es100']['rmse']:+.6f}"
+            f"  Δ(pfx80)={mean_rmse-BASELINES['gru_prefix80']['rmse']:+.6f}"
+            f"  [{time_mod.time()-t0:.0f}s]")
 
     gru_best = min(gru_results, key=lambda r: r["mean_rmse"])
-    log(f"  GRU best: {gru_best['segment']}  RMSE={gru_best['mean_rmse']:.6f}"
-        f"  (baseline={BASELINES['gru']['rmse']:.6f}"
-        f"  Δ={gru_best['mean_rmse']-BASELINES['gru']['rmse']:+.6f})")
+    log(f"  GRU best: ES-{gru_best['pct']}%  RMSE={gru_best['mean_rmse']:.6f}"
+        f"  vs ES-100%={BASELINES['gru_es100']['rmse']:.6f}"
+        f"  vs prefix-80%={BASELINES['gru_prefix80']['rmse']:.6f}")
 
-    # ── T2: XGBoost sweep ─────────────────────────────────────────────────────
+    # ── T2: XGB sweep ─────────────────────────────────────────────────────────
     n_delta      = bin(XGB_MASK).count("1") * 4
-    delta_cols   = [f"f{k}" for k in range(n_delta)]
-    feature_cols = delta_cols + META_FEATURES
+    feature_cols = [f"f{k}" for k in range(n_delta)] + META_FEATURES
     log(f"\n--- T2: XGBoost  n_feat={len(feature_cols)}  ({mask_label(XGB_MASK)}) ---")
     xgb_results: list[dict] = []
     t0 = time_mod.time()
 
-    for seg_task, seg_desc in SEGMENTS.items():
-        feat_df = build_xgb_df(cache, first_run, proc_clean, XGB_MASK, seg_task)
+    for pct in RATIOS:
+        feat_df = build_xgb_df(cache, first_run, proc_clean, XGB_MASK, pct)
         feat_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         feat_df.fillna(0.0, inplace=True)
-        seed_rmses = []
-        for seed in SEEDS:
-            rmse = run_xgb_locv(feat_df, feature_cols, seed)
-            seed_rmses.append(rmse)
-        mean_rmse = float(np.mean(seed_rmses))
-        std_rmse  = float(np.std(seed_rmses))
-        xgb_results.append({"segment": seg_task, "desc": seg_desc,
-                            "mean_rmse": mean_rmse, "std_rmse": std_rmse,
+        seed_rmses = [run_xgb_locv(feat_df, feature_cols, s) for s in SEEDS]
+        mean_rmse  = float(np.mean(seed_rmses))
+        std_rmse   = float(np.std(seed_rmses))
+        xgb_results.append({"pct": pct, "mean_rmse": mean_rmse, "std_rmse": std_rmse,
                             "seed_rmses": seed_rmses})
-        delta = mean_rmse - BASELINES["xgb"]["rmse"]
-        log(f"  XGB {seg_task:<15}  RMSE={mean_rmse:.6f}  std={std_rmse:.6f}"
-            f"  Δbaseline={delta:+.6f}  [{time_mod.time()-t0:.0f}s]")
+        log(f"  XGB ES-ratio={pct:3d}%  RMSE={mean_rmse:.6f}  std={std_rmse:.6f}"
+            f"  Δ(ES100)={mean_rmse-BASELINES['xgb_es100']['rmse']:+.6f}"
+            f"  Δ(pfx90)={mean_rmse-BASELINES['xgb_prefix90']['rmse']:+.6f}"
+            f"  [{time_mod.time()-t0:.0f}s]")
 
     xgb_best = min(xgb_results, key=lambda r: r["mean_rmse"])
-    log(f"  XGB best: {xgb_best['segment']}  RMSE={xgb_best['mean_rmse']:.6f}"
-        f"  (baseline={BASELINES['xgb']['rmse']:.6f}"
-        f"  Δ={xgb_best['mean_rmse']-BASELINES['xgb']['rmse']:+.6f})")
+    log(f"  XGB best: ES-{xgb_best['pct']}%  RMSE={xgb_best['mean_rmse']:.6f}"
+        f"  vs ES-100%={BASELINES['xgb_es100']['rmse']:.6f}"
+        f"  vs prefix-90%={BASELINES['xgb_prefix90']['rmse']:.6f}")
 
     # ── Save ──────────────────────────────────────────────────────────────────
     all_rows = []
     for r in gru_results:
         all_rows.append({"model": "feature_gru", "mask": GRU_MASK,
-                         "sensor_subset": mask_label(GRU_MASK), "segment": r["segment"],
+                         "sensor_subset": mask_label(GRU_MASK),
+                         "input_strategy": "entry_steady_ratio", "pct": r["pct"],
                          "mean_rmse": r["mean_rmse"], "std_rmse": r["std_rmse"],
                          **{f"seed{i}_rmse": r["seed_rmses"][i] for i in range(len(SEEDS))}})
     for r in xgb_results:
         all_rows.append({"model": "xgboost", "mask": XGB_MASK,
-                         "sensor_subset": mask_label(XGB_MASK), "segment": r["segment"],
+                         "sensor_subset": mask_label(XGB_MASK),
+                         "input_strategy": "entry_steady_ratio", "pct": r["pct"],
                          "mean_rmse": r["mean_rmse"], "std_rmse": r["std_rmse"],
                          **{f"seed{i}_rmse": r["seed_rmses"][i] for i in range(len(SEEDS))}})
     all_df = pd.DataFrame(all_rows)
-    all_df.to_csv(out_dir / "metrics" / "segment_results.csv", index=False)
+    all_df.to_csv(out_dir / "metrics" / "es_ratio_results.csv", index=False)
 
     # ── Plot ──────────────────────────────────────────────────────────────────
-    plot_segment_bar(gru_results, xgb_results, out_dir / "figures" / "segment_sweep")
+    plot_ratio_curve(gru_results, xgb_results, out_dir / "figures" / "es_ratio_curve")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     log("\n=== SUMMARY ===")
-    log(f"{'Segment':<16} {'GRU_RMSE':>10}  {'XGB_RMSE':>10}")
-    log("-" * 42)
+    log(f"{'ES-ratio':>10}  {'GRU_RMSE':>10}  {'XGB_RMSE':>10}")
+    log("-" * 36)
     for g, x in zip(gru_results, xgb_results):
-        g_mark = "★" if g["segment"] == gru_best["segment"] else " "
-        x_mark = "★" if x["segment"] == xgb_best["segment"] else " "
-        log(f"{g['segment']:<16} {g_mark}{g['mean_rmse']:>9.6f}  {x_mark}{x['mean_rmse']:>9.6f}")
-
-    log(f"\nGRU  best: {gru_best['segment']:<15}  RMSE={gru_best['mean_rmse']:.6f}"
-        f"  Δbaseline={gru_best['mean_rmse']-BASELINES['gru']['rmse']:+.6f}")
-    log(f"XGB  best: {xgb_best['segment']:<15}  RMSE={xgb_best['mean_rmse']:.6f}"
-        f"  Δbaseline={xgb_best['mean_rmse']-BASELINES['xgb']['rmse']:+.6f}")
+        gm = "★" if g["pct"] == gru_best["pct"] else " "
+        xm = "★" if x["pct"] == xgb_best["pct"] else " "
+        log(f"{g['pct']:>8d}%  {gm}{g['mean_rmse']:>9.6f}  {xm}{x['mean_rmse']:>9.6f}")
+    log(f"\nGRU  best: ES-{gru_best['pct']}%  RMSE={gru_best['mean_rmse']:.6f}"
+        f"  (ES-100%={BASELINES['gru_es100']['rmse']:.6f}"
+        f", prefix-80%={BASELINES['gru_prefix80']['rmse']:.6f})")
+    log(f"XGB  best: ES-{xgb_best['pct']}%  RMSE={xgb_best['mean_rmse']:.6f}"
+        f"  (ES-100%={BASELINES['xgb_es100']['rmse']:.6f}"
+        f", prefix-90%={BASELINES['xgb_prefix90']['rmse']:.6f})")
 
     summary = {
-        "experiment": "H13_S1_input_segment_sweep",
-        "segments": list(SEGMENTS.keys()),
+        "experiment": "H14_S1_entry_steady_ratio_sweep",
+        "segment": "Entry_Steady",
         "gru": {"mask": GRU_MASK, "sensor_subset": mask_label(GRU_MASK),
-                "best_segment": gru_best["segment"], "best_rmse": gru_best["mean_rmse"],
-                "baseline": BASELINES["gru"], "results": gru_results},
+                "best_pct": gru_best["pct"], "best_rmse": gru_best["mean_rmse"],
+                "baselines": {k: v for k, v in BASELINES.items() if k.startswith("gru")},
+                "results": gru_results},
         "xgb": {"mask": XGB_MASK, "sensor_subset": mask_label(XGB_MASK),
-                "best_segment": xgb_best["segment"], "best_rmse": xgb_best["mean_rmse"],
-                "baseline": BASELINES["xgb"], "results": xgb_results},
-        "seeds": SEEDS, "execution_dir": str(out_dir),
+                "best_pct": xgb_best["pct"], "best_rmse": xgb_best["mean_rmse"],
+                "baselines": {k: v for k, v in BASELINES.items() if k.startswith("xgb")},
+                "results": xgb_results},
+        "seeds": SEEDS, "ratios": RATIOS, "execution_dir": str(out_dir),
     }
     (out_dir / "logs" / "summary.json").write_text(
         json.dumps(summary, indent=2, default=str), encoding="utf-8")
