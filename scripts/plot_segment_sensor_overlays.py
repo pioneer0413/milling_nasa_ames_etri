@@ -2,7 +2,7 @@
 """Plot per-run multi-sensor overlays with cutting-segment boundaries.
 
 Uses the v2 segment table:
-  datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv
+  datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv
 
 For each run in the segment table, all six sensors are robust-normalized and
 overlaid in one figure. Segment regions are shaded and boundaries are marked:
@@ -25,7 +25,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 
 SENSORS = ["smcAC", "smcDC", "vib_table", "vib_spindle", "AE_table", "AE_spindle"]
-DEFAULT_SEG_CSV = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+DEFAULT_SEG_CSV = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 DEFAULT_SIGNAL_CSV = ROOT / "datasets/processed/mill_signal_data.csv"
 DEFAULT_OUTPUT_DIR = ROOT / "eda/result/segment_sensor_overlay_by_run"
 

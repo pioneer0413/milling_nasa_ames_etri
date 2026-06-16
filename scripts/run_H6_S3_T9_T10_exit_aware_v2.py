@@ -46,7 +46,7 @@ from scripts.run_H4_S5_feature_gru_hpo import (  # noqa: E402
 SEEDS = [0, 1, 2]
 BEST = {**BASE, "head_hidden": 32, "name": "head32"}
 INPUT_DIM = 4 * len(SENSORS) + len(META_FEATURES)            # 27
-SEG_V2 = ROOT / "datasets/cutting_segment_v2/seg_reverse_kurtosis_smcDC.csv"
+SEG_V2 = ROOT / "datasets/nasa/cutting_segment_v2/seg_reverse_kurtosis_smcDC.csv"
 PREFIX80_ANCHOR = 0.090773                                   # V1 prefix-80 (head32, 3-seed)
 T5_STEADY5 = 0.101950                                        # steady5 exit-removed (T5) for reference
 

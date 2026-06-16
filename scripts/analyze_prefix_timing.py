@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 CASE_SCOPE    = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 SENSORS       = ["smcAC", "smcDC", "vib_table", "vib_spindle", "AE_table", "AE_spindle"]
 EXCLUDED_RUNS = {(2, 1), (12, 1)}
-SEG_CSV       = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+SEG_CSV       = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 RATIOS        = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 

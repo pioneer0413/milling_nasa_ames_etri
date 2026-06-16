@@ -45,7 +45,7 @@ GRU_MASK      = 13   # AC+vT+vS
 XGB_MASK      = 9    # AC+vS
 GRU_PREFIX    = 80
 XGB_PREFIX    = 90
-SEG_CSV       = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+SEG_CSV       = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 
 GRU_CFG = dict(
     hidden_size=256, num_layers=3, dropout=0.1, head_hidden=32,

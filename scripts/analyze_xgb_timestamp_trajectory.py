@@ -48,7 +48,7 @@ XGB_MASK      = 9       # AC+vS
 SEED          = 0
 N_ESTIMATORS  = 50      # fast for trajectory (shape matters, not absolute accuracy)
 STEP          = 1       # sample step
-SEG_CSV       = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+SEG_CSV       = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 
 XGB_CFG = dict(
     learning_rate=0.03, n_estimators=N_ESTIMATORS, max_depth=3, min_child_weight=8,

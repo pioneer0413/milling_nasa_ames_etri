@@ -184,7 +184,7 @@ def segment_slices(n: int, seg_row: pd.Series | None) -> dict[str, slice]:
 def load_records() -> tuple[pd.DataFrame, pd.DataFrame]:
     signal = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv")
     process = prepare_process(pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv"))
-    seg_path = ROOT / "datasets/cutting_segment/seg_heuristic.csv"
+    seg_path = ROOT / "datasets/nasa/cutting_segment/seg_heuristic.csv"
     seg = pd.read_csv(seg_path) if seg_path.exists() else pd.DataFrame()
     merged = signal.merge(process, on=["case", "run"], how="left")
     seg_map = {(int(r.case), int(r.run)): r for r in seg.itertuples(index=False)} if not seg.empty else {}
@@ -714,7 +714,7 @@ def main() -> None:
                 "source_files": [
                     "datasets/processed/mill_signal_data.csv",
                     "datasets/processed/mill_process_info.csv",
-                    "datasets/cutting_segment/seg_heuristic.csv",
+                    "datasets/nasa/cutting_segment/seg_heuristic.csv",
                 ],
             },
             indent=2,

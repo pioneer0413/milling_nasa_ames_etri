@@ -45,7 +45,7 @@ from scripts.run_H4_S5_feature_gru_hpo import (  # noqa: E402
 SEEDS = [0, 1, 2]
 BEST = {**BASE, "head_hidden": 32, "name": "head32"}          # V1 best (per-timestep)
 INPUT_DIM = 4 * len(SENSORS) + len(META_FEATURES)             # 27
-HEUR = ROOT / "datasets/cutting_segment/seg_peng2026_steady5.csv"
+HEUR = ROOT / "datasets/nasa/cutting_segment/seg_peng2026_steady5.csv"
 PREFIX80_ANCHOR = 0.090773                                    # V1 prefix-80 (head32, 3-seed)
 
 TASKS = {

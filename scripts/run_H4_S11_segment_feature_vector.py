@@ -16,7 +16,7 @@ prefix (e.g. EXIT at low input ratio) -> zero-filled block.
 
 Segment boundaries (v2): seg_peng2026_steady5 with idx_end(=exit_start) overwritten
 by reverse-kurtosis smcDC exit detection ->
-  datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv
+  datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv
   No-load[0:idx_noload_end] / Entry[..:idx_start] / Steady[idx_start:idx_end] / Exit[idx_end:]
 
 Compares, for XGBoost and Feature-GRU, two feature sets across an input-ratio sweep:
@@ -57,7 +57,7 @@ from scripts.run_H4_S5_feature_gru_hpo import (  # noqa: E402
     compute_metrics, extract_features, fit_predict_gru, parse_signal, preprocess,
 )
 
-SEG_FILE = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+SEG_FILE = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 SEG_BLOCKS = ["full", "entry", "steady", "exit"]   # No-load excluded (air-cutting noise)
 STATS = ["mean", "rms", "std", "peak"]
 SEEDS = [0, 1, 2]

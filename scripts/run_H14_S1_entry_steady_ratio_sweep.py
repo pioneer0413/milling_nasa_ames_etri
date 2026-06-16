@@ -64,7 +64,7 @@ BASELINES = {
     "xgb_prefix90": {"label": "H12_S1_T2 prefix-90%", "rmse": 0.103660},
 }
 
-SEG_CSV = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+SEG_CSV = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 
 GRU_CFG = dict(
     hidden_size=256, num_layers=3, dropout=0.1, head_hidden=32,

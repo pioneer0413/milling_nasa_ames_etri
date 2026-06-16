@@ -47,7 +47,7 @@ from scripts.run_H4_S6_history_aware_input_ratio import (  # noqa: E402
 
 SEEDS = [0, 1, 2]
 # Cutting-segment source for the Exit boundary (idx_end). steady5 = Steady target_length 5000.
-HEUR = ROOT / "datasets/cutting_segment/seg_peng2026_steady5.csv"
+HEUR = ROOT / "datasets/nasa/cutting_segment/seg_peng2026_steady5.csv"
 S1_PREFIX80_RMSE = 0.110854  # H6.S1 comparison anchor
 
 TASKS = {

@@ -12,7 +12,7 @@ sensor-source axis and prioritizes visual diagnostics:
 
 Outputs:
   experiments/analysis/segment_sensor_source/{timestamp}_sensor_source_visualization/
-  datasets/cutting_segment_v2/sensor_source/
+  datasets/nasa/cutting_segment_v2/sensor_source/
 """
 from __future__ import annotations
 
@@ -38,10 +38,10 @@ from scripts.run_H4_S5_feature_gru_hpo import CASE_SCOPE, SENSORS, THRESH, parse
 
 SIGNAL_CSV = ROOT / "datasets/processed/mill_signal_data.csv"
 PROCESS_CSV = ROOT / "datasets/processed/mill_process_info.csv"
-BASE_SEG_CSV = ROOT / "datasets/cutting_segment/seg_peng2026_steady5.csv"
-LEGACY_V2_CSV = ROOT / "datasets/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
-LEGACY_EXIT_CSV = ROOT / "datasets/cutting_segment_v2/seg_reverse_kurtosis_smcDC.csv"
-DATASET_OUT = ROOT / "datasets/cutting_segment_v2/sensor_source"
+BASE_SEG_CSV = ROOT / "datasets/nasa/cutting_segment/seg_peng2026_steady5.csv"
+LEGACY_V2_CSV = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
+LEGACY_EXIT_CSV = ROOT / "datasets/nasa/cutting_segment_v2/seg_reverse_kurtosis_smcDC.csv"
+DATASET_OUT = ROOT / "datasets/nasa/cutting_segment_v2/sensor_source"
 ANALYSIS_ROOT = ROOT / "experiments/analysis/segment_sensor_source"
 
 
