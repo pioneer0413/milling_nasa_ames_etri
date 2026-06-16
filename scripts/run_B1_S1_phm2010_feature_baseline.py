@@ -14,6 +14,8 @@ Models:
   RF        : RandomForestRegressor (70 features)
   SVR       : SVR RBF (70 features)
   MLP_Feat  : 2-layer MLP (70→128→64→1)
+  FeatRNN   : RNN over run sequence (70 features/step, 315 steps)
+  FeatLSTM  : LSTM over run sequence (70 features/step, 315 steps)
   FeatGRU   : GRU over run sequence (70 features/step, 315 steps)
 
 Output: experiments/executions/B1/S1/{timestamp}_phm2010_feature_baseline/
@@ -187,13 +189,17 @@ def run_mlp_feat(df: pd.DataFrame, device: torch.device, seed: int) -> tuple[flo
     return float(np.mean(list(case_rmses.values()))), case_rmses
 
 
-# ─── Feature Sequence GRU ─────────────────────────────────────────────────────
-class FeatureSeqGRU(nn.Module):
-    def __init__(self, input_dim: int) -> None:
+# ─── Feature Sequence Models (RNN / LSTM / GRU) ───────────────────────────────
+_CELL_CLS = {"rnn": nn.RNN, "lstm": nn.LSTM, "gru": nn.GRU}
+
+
+class FeatureSeqModel(nn.Module):
+    def __init__(self, input_dim: int, cell: str = "gru") -> None:
         super().__init__()
         drop = SEQ_DROPOUT if SEQ_LAYERS > 1 else 0.0
-        self.rnn = nn.GRU(input_dim, SEQ_HIDDEN, SEQ_LAYERS,
-                          batch_first=True, dropout=drop)
+        self.is_lstm = cell == "lstm"
+        self.rnn = _CELL_CLS[cell](input_dim, SEQ_HIDDEN, SEQ_LAYERS,
+                                   batch_first=True, dropout=drop)
         self.head = nn.Sequential(
             nn.Linear(SEQ_HIDDEN, SEQ_HEAD_HID), nn.ReLU(),
             nn.Linear(SEQ_HEAD_HID, 1),
@@ -205,6 +211,10 @@ class FeatureSeqGRU(nn.Module):
         out_packed, _ = self.rnn(packed)
         out, _ = nn.utils.rnn.pad_packed_sequence(out_packed, batch_first=True)
         return self.head(out).squeeze(-1)
+
+
+# keep alias for backward compatibility
+FeatureSeqGRU = FeatureSeqModel
 
 
 def _build_seq_cases(df: pd.DataFrame, scaler: StandardScaler) -> dict[int, dict]:
@@ -220,7 +230,8 @@ def _build_seq_cases(df: pd.DataFrame, scaler: StandardScaler) -> dict[int, dict
     return cases
 
 
-def run_feat_gru(df: pd.DataFrame, device: torch.device, seed: int) -> tuple[float, dict[int, float]]:
+def run_feat_seq(df: pd.DataFrame, device: torch.device, seed: int,
+                 cell: str = "gru") -> tuple[float, dict[int, float]]:
     input_dim = len(FEAT_COLS)
     case_rmses: dict[int, float] = {}
 
@@ -248,7 +259,7 @@ def run_feat_gru(df: pd.DataFrame, device: torch.device, seed: int) -> tuple[flo
         torch.manual_seed(seed)
         if device.type == "cuda":
             torch.cuda.manual_seed_all(seed)
-        model = FeatureSeqGRU(input_dim).to(device)
+        model = FeatureSeqModel(input_dim, cell=cell).to(device)
         opt = torch.optim.Adam(model.parameters(), lr=SEQ_LR, weight_decay=SEQ_WD)
         sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=SEQ_EPOCHS)
 
@@ -276,6 +287,10 @@ def run_feat_gru(df: pd.DataFrame, device: torch.device, seed: int) -> tuple[flo
     return float(np.mean(list(case_rmses.values()))), case_rmses
 
 
+def run_feat_gru(df: pd.DataFrame, device: torch.device, seed: int) -> tuple[float, dict[int, float]]:
+    return run_feat_seq(df, device, seed, cell="gru")
+
+
 # ─── Aggregation ──────────────────────────────────────────────────────────────
 def aggregate_seeds(results_per_seed: list[tuple[float, dict[int, float]]]) -> tuple[float, float, dict[int, float]]:
     means = [r[0] for r in results_per_seed]
@@ -295,6 +310,8 @@ _COLOR_MAP = {
     "SVR":      "#3a64bc",
     "RF":       "#2c50a8",
     "MLP_Feat": "#1e3c94",
+    "FeatRNN":  "#98df8a",
+    "FeatLSTM": "#17becf",
     "FeatGRU":  "#2ca02c",
 }
 _DEFAULT_COLOR = "#999999"
@@ -318,7 +335,7 @@ def plot_results(model_names: list[str], means: list[float], stds: list[float], 
     ax.set_xticks(range(len(model_names)))
     ax.set_xticklabels(model_names, rotation=20, ha="right", fontsize=10)
     ax.set_ylabel("RMSE [µm] (LOCV-3 mean ± std)")
-    ax.set_title("B1_S1: PHM2010 Feature Baseline — 7 models, LOCV-3")
+    ax.set_title("B1_S1: PHM2010 Feature Baseline — 9 models, LOCV-3")
     ax.legend(fontsize=9)
     ax.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
@@ -374,7 +391,9 @@ def main() -> None:
     for name, fn in [
         ("RF",       lambda seed: run_rf(df, seed)),
         ("MLP_Feat", lambda seed: run_mlp_feat(df, device, seed)),
-        ("FeatGRU",  lambda seed: run_feat_gru(df, device, seed)),
+        ("FeatRNN",  lambda seed: run_feat_seq(df, device, seed, "rnn")),
+        ("FeatLSTM", lambda seed: run_feat_seq(df, device, seed, "lstm")),
+        ("FeatGRU",  lambda seed: run_feat_seq(df, device, seed, "gru")),
     ]:
         log(f"\n--- {name} (5-seed) ---")
         seed_results: list[tuple[float, dict[int, float]]] = []
