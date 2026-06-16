@@ -49,6 +49,8 @@ datasets/raw/
 datasets/processed/
 datasets/cache/
 datasets/tmp/
+datasets/nasa/raw_signal.csv
+datasets/phm2010/raw_signal.csv
 
 # Experiment execution outputs
 experiments/executions/
