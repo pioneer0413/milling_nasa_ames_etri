@@ -1,0 +1,29 @@
+# Tool-wear (VB) prediction — NASA Ames milling + PHM2010
+# Tested on Python 3.12 (Linux / WSL2). See README.md for setup.
+#
+# NOTE on torch: the pinned version is the CPU/CUDA build resolved on the
+# development machine. On a new device, `pip install torch` will fetch the
+# default build for your platform; for a specific CUDA build see
+# https://pytorch.org/get-started/locally/
+
+# ── Numerical core ──
+numpy==2.4.4
+pandas==3.0.1
+scipy==1.17.1
+
+# ── Machine learning ──
+scikit-learn==1.8.0
+xgboost==3.2.0
+torch==2.11.0
+
+# ── Signal processing ──
+PyWavelets==1.9.0
+
+# ── Utilities ──
+joblib==1.5.3
+networkx==3.6.1
+PyYAML==6.0.3
+
+# ── Visualization ──
+matplotlib==3.10.8
+seaborn==0.13.2
