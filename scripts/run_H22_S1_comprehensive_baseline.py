@@ -756,6 +756,13 @@ def plot_results(model_names, means, stds, out_dir):
     plt.close(fig)
 
 
+def save_checkpoint(results: dict, out_dir: Path) -> None:
+    ckpt = {n: {"mean": m, "std": s} for n, (m, s, _) in results.items()}
+    (out_dir / "metrics" / "checkpoint.json").write_text(
+        json.dumps(ckpt, indent=2), encoding="utf-8"
+    )
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -774,9 +781,9 @@ def main() -> None:
     log(f"Seeds={SEEDS}, PCT={PCT}%, LOCV={len(CASE_SCOPE)} cases")
 
     log("\nLoading data...")
-    signal_df  = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv",
+    signal_df  = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
                              usecols=["case", "run"] + SENSORS)
-    process_df = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    process_df = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     process_df = process_df[process_df["case"].isin(CASE_SCOPE)].copy()
     signal_df  = signal_df[signal_df["case"].isin(CASE_SCOPE)].copy()
     proc_clean = preprocess(process_df)
@@ -814,6 +821,7 @@ def main() -> None:
         mean_, case_r = fn()
         results[name] = (mean_, 0.0, case_r)
         log(f"  RMSE={mean_:.6f}  [{time_mod.time()-t0:.1f}s]")
+        save_checkpoint(results, out_dir)
 
     # ── Stochastic models (5 seeds) ───────────────────────────────────────────
     for name, fn in [
@@ -835,6 +843,7 @@ def main() -> None:
         m, s, case_r = aggregate_seeds(seed_results)
         results[name] = (m, s, case_r)
         log(f"  {name}: mean={m:.6f}  std={s:.6f}")
+        save_checkpoint(results, out_dir)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     log("\n=== SUMMARY ===")

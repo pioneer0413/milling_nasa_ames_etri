@@ -182,8 +182,8 @@ def segment_slices(n: int, seg_row: pd.Series | None) -> dict[str, slice]:
 
 
 def load_records() -> tuple[pd.DataFrame, pd.DataFrame]:
-    signal = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv")
-    process = prepare_process(pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv"))
+    signal = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv")
+    process = prepare_process(pd.read_csv(ROOT / "datasets/nasa/process_info.csv"))
     seg_path = ROOT / "datasets/nasa/cutting_segment/seg_heuristic.csv"
     seg = pd.read_csv(seg_path) if seg_path.exists() else pd.DataFrame()
     merged = signal.merge(process, on=["case", "run"], how="left")
@@ -445,8 +445,8 @@ def choose_runs(df: pd.DataFrame, case_id: int) -> list[int]:
 
 
 def plot_waveforms_and_psd(dirs: dict[str, Path], manifest: list[dict]) -> None:
-    signal = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv")
-    process = prepare_process(pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv"))
+    signal = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv")
+    process = prepare_process(pd.read_csv(ROOT / "datasets/nasa/process_info.csv"))
     merged = signal.merge(process, on=["case", "run"], how="left")
     for case_id in sorted(merged["case"].unique()):
         runs = choose_runs(merged, int(case_id))
@@ -598,7 +598,7 @@ def write_report(
         "",
         "## Scope",
         "",
-        f"- Dataset: `datasets/processed/mill_signal_data.csv` + `datasets/processed/mill_process_info.csv`",
+        f"- Dataset: `datasets/nasa/raw_signal.csv` + `datasets/nasa/process_info.csv`",
         f"- Sampling frequency: {FS:.0f} Hz",
         f"- Cases: {cases}",
         f"- Run rows: {n_runs}",
@@ -712,8 +712,8 @@ def main() -> None:
                 "segments": SEGMENTS,
                 "features": FEATURES,
                 "source_files": [
-                    "datasets/processed/mill_signal_data.csv",
-                    "datasets/processed/mill_process_info.csv",
+                    "datasets/nasa/raw_signal.csv",
+                    "datasets/nasa/process_info.csv",
                     "datasets/nasa/cutting_segment/seg_heuristic.csv",
                 ],
             },

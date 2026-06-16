@@ -432,10 +432,10 @@ def main() -> None:
     # ── Load data ──────────────────────────────────────────────────────────────
     log("Loading data...")
     sig = pd.read_csv(
-        ROOT / "datasets/processed/mill_signal_data.csv",
+        ROOT / "datasets/nasa/raw_signal.csv",
         usecols=["case", "run"] + list(_SENSOR_COL.values()),
     )
-    proc = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    proc = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     proc = proc[proc["case"].isin(case_scope)].copy()
     sig = sig[sig["case"].isin(case_scope)].copy()
     proc_clean = _preprocess(proc)

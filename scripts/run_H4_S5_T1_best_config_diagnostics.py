@@ -102,8 +102,8 @@ def main() -> None:
     (out / "analysis").mkdir(parents=True, exist_ok=True)
 
     print("Loading data + building Delta+Meta feature matrix (prefix 80%)...", flush=True)
-    sig = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv", usecols=["case", "run"] + SENSORS)
-    proc = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    sig = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv", usecols=["case", "run"] + SENSORS)
+    proc = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     proc = proc[proc["case"].isin(CASE_SCOPE)].copy()
     sig = sig[sig["case"].isin(CASE_SCOPE)].copy()
     feat = build_feature_matrix(sig, preprocess(proc), [PREFIX])

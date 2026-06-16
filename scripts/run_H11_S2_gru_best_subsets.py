@@ -264,9 +264,9 @@ def main() -> None:
         log(f"  {name}: {sensors}  (input_dim={len(sensors)*4+3})")
 
     log("\nLoading data...")
-    signal_df  = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv",
+    signal_df  = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
                              usecols=["case", "run"] + ALL_SENSORS)
-    process_df = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    process_df = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     process_df = process_df[process_df["case"].isin(CASE_SCOPE)].copy()
     signal_df  = signal_df[signal_df["case"].isin(CASE_SCOPE)].copy()
     proc_clean = preprocess(process_df)

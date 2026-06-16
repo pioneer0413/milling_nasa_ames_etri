@@ -542,9 +542,9 @@ def main() -> None:
 
     # ── Load data (once) ──────────────────────────────────────────────────
     log("Loading data...")
-    sig_df = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv",
+    sig_df = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
                          usecols=["case", "run"] + SENSORS)
-    proc_df = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    proc_df = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     proc_df = proc_df[proc_df["case"].isin(CASE_SCOPE)].copy()
     sig_df = sig_df[sig_df["case"].isin(CASE_SCOPE)].copy()
 

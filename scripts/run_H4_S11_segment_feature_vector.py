@@ -220,8 +220,8 @@ def main():
     log(f"=== H4_S11 segment feature vector === prefixes={prefixes} seeds={seeds} models={args.models}")
     log(f"segment file: {SEG_FILE.name}  blocks={SEG_BLOCKS}")
 
-    sig = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv", usecols=["case", "run"] + SENSORS)
-    proc = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    sig = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv", usecols=["case", "run"] + SENSORS)
+    proc = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     seg = pd.read_csv(SEG_FILE)
     proc = proc[proc.case.isin(CASE_SCOPE)].copy()
     sig = sig[sig.case.isin(CASE_SCOPE)].copy()

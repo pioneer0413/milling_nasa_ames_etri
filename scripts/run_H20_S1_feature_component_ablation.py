@@ -354,9 +354,9 @@ def main() -> None:
     log(f"Ref (Delta+Meta, H17): mean={REF_DELTA_META_MEAN}, std={REF_DELTA_META_STD}")
 
     log("\nLoading data...")
-    signal_df  = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv",
+    signal_df  = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
                              usecols=["case", "run"] + SENSORS)
-    process_df = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    process_df = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     process_df = process_df[process_df["case"].isin(CASE_SCOPE)].copy()
     signal_df  = signal_df[signal_df["case"].isin(CASE_SCOPE)].copy()
     proc_clean = preprocess(process_df)

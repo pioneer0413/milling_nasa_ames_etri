@@ -36,7 +36,7 @@ from scripts.run_H4_S5_feature_gru_hpo import (
     EXCLUDED_RUNS, SENSORS, META_FEATURES, build_feature_matrix, delta_col_names, preprocess,
 )
 
-SIGNAL_CSV = ROOT / "datasets/processed/mill_signal_data.csv"
+SIGNAL_CSV = ROOT / "datasets/nasa/raw_signal.csv"
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 TS = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -50,7 +50,7 @@ GRU_PRED  = ROOT / "experiments/executions/H4/S5/2026-06-10_152134_feature_gru_b
 XGB_CASE  = ROOT / "experiments/executions/H4/S9/2026-06-11_113620_xgb_hpo_all/metrics/per_case_metrics.csv"
 SWEEP_70_90 = ROOT / "experiments/executions/H4/S5/2026-06-10_182042_fine_prefix_sweep_70_90/metrics/per_case_metrics.csv"
 SWEEP_50_70 = ROOT / "experiments/executions/H4/S5/2026-06-10_190003_fine_prefix_sweep_50_70/metrics/per_case_metrics.csv"
-PROCESS_CSV = ROOT / "datasets/processed/mill_process_info.csv"
+PROCESS_CSV = ROOT / "datasets/nasa/process_info.csv"
 VALID_RMSE  = ROOT / "experiments/executions/H1/S8/2026-06-11_144336_nasa_vibration_deep_eda/analysis/H1_S8_case_effective_vb_resolution.csv"
 
 FOCUS = [1, 12]

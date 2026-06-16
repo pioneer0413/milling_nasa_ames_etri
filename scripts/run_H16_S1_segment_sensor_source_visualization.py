@@ -36,8 +36,8 @@ if str(ROOT) not in sys.path:
 
 from scripts.run_H4_S5_feature_gru_hpo import CASE_SCOPE, SENSORS, THRESH, parse_signal  # noqa: E402
 
-SIGNAL_CSV = ROOT / "datasets/processed/mill_signal_data.csv"
-PROCESS_CSV = ROOT / "datasets/processed/mill_process_info.csv"
+SIGNAL_CSV = ROOT / "datasets/nasa/raw_signal.csv"
+PROCESS_CSV = ROOT / "datasets/nasa/process_info.csv"
 BASE_SEG_CSV = ROOT / "datasets/nasa/cutting_segment/seg_peng2026_steady5.csv"
 LEGACY_V2_CSV = ROOT / "datasets/nasa/cutting_segment_v2/seg_peng2026_steady5_exitfix_reverse_kurtosis.csv"
 LEGACY_EXIT_CSV = ROOT / "datasets/nasa/cutting_segment_v2/seg_reverse_kurtosis_smcDC.csv"

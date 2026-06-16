@@ -64,8 +64,8 @@ def main():
         print(line, flush=True); log_lines.append(line)
 
     log(f"=== H4_S8 XGBoost+Feature-GRU ensemble === prefixes={PREFIXES} seeds={SEEDS}")
-    sig = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv", usecols=["case", "run"] + SENSORS)
-    proc = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    sig = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv", usecols=["case", "run"] + SENSORS)
+    proc = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     proc = proc[proc.case.isin(CASE_SCOPE)].copy()
     sig = sig[sig.case.isin(CASE_SCOPE)].copy()
     proc_clean = preprocess(proc)

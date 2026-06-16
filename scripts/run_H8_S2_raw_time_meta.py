@@ -314,9 +314,9 @@ def main() -> None:
     log("=== H8_S2: baseline vs time_norm vs raw_time meta feature ===")
 
     log("Loading & preprocessing...")
-    signal_df = pd.read_csv(ROOT / "datasets/processed/mill_signal_data.csv",
+    signal_df = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
                             usecols=["case", "run"] + SENSORS)
-    process_df = pd.read_csv(ROOT / "datasets/processed/mill_process_info.csv")
+    process_df = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
     process_df = process_df[process_df["case"].isin(CASE_SCOPE)].copy()
     signal_df  = signal_df[signal_df["case"].isin(CASE_SCOPE)].copy()
     proc_clean = preprocess(process_df)

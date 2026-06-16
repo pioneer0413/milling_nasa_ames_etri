@@ -38,7 +38,7 @@ def parse_signal(value: object) -> np.ndarray:
 def main() -> None:
     print("Loading data...", flush=True)
     signal_df = pd.read_csv(
-        ROOT / "datasets/processed/mill_signal_data.csv",
+        ROOT / "datasets/nasa/raw_signal.csv",
         usecols=["case", "run", "smcAC"],
     )
     signal_df = signal_df[signal_df["case"].isin(CASE_SCOPE)].copy()
