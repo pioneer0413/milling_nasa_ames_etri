@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H19_S1: Shuffled-Sequence Ablation — does GRU actually use run ordering?
+"""B2_S1: Shuffled-Sequence Ablation — does GRU actually use run ordering?
 
 B2 논문화 블로커 해소. 동일 GRU 아키텍처(AC+vT+vS)에서 run 순서를 무작위 치환하여
 순서 정보 제거 시 성능이 얼마나 하락하는지 정량화.
@@ -7,16 +7,16 @@ B2 논문화 블로커 해소. 동일 GRU 아키텍처(AC+vT+vS)에서 run 순�
 설계:
   - Case별로 run 순서를 무작위 permutation (훈련+테스트 모두 동일하게 적용)
   - seed별로 다른 permutation → 평균 성능 = "ordering 없는 GRU" 기댓값
-  - ordered GRU(H17_S1): mean=0.095122, std=0.001554
+  - ordered GRU(B4_S1): mean=0.095122, std=0.001554
   - shuffled GRU: if RMSE >> ordered → GRU는 실제로 순서를 이용함
 
 설정:
-  GRU: AC+vT+vS (mask=13), input_dim=15, same hyperparams as H17
+  GRU: AC+vT+vS (mask=13), input_dim=15, same hyperparams as B4
   Seeds: [0, 1, 2, 3, 4]
   Input: 100% (no prefix/segment)
   Protocol: LOCV 15 cases, observed_vb eval
 
-Output: experiments/executions/H19/S1/{timestamp}_shuffled_ablation/
+Output: experiments/executions/B2/S1/{timestamp}_shuffled_ablation/
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ N_SENSORS     = len(SENSORS)
 
 GRU_MASK = 13   # AC+vT+vS
 
-# Reference from H17_S1 (ordered, 5-seed)
+# Reference from B4_S1 (ordered, 5-seed)
 REF_ORDERED_MEAN = 0.095122
 REF_ORDERED_STD  = 0.001554
 
@@ -331,8 +331,8 @@ def plot_results(
     ax = axes[0]
     x = np.arange(len(SEEDS))
     w = 0.35
-    ax.bar(x - w/2, ordered_rmses,  w, label="Ordered (H17 ref)",  color="steelblue", alpha=0.85)
-    ax.bar(x + w/2, shuffled_rmses, w, label="Shuffled (H19)",     color="tomato",    alpha=0.85)
+    ax.bar(x - w/2, ordered_rmses,  w, label="Ordered (B4 ref)",  color="steelblue", alpha=0.85)
+    ax.bar(x + w/2, shuffled_rmses, w, label="Shuffled (B2)",     color="tomato",    alpha=0.85)
     ax.axhline(np.mean(ordered_rmses),  color="steelblue", linestyle="--", linewidth=1.2,
                label=f"Ordered mean={np.mean(ordered_rmses):.4f}")
     ax.axhline(np.mean(shuffled_rmses), color="tomato",    linestyle="--", linewidth=1.2,
@@ -361,7 +361,7 @@ def plot_results(
 
     delta = np.mean(shuffled_rmses) - np.mean(ordered_rmses)
     fig.suptitle(
-        f"H19_S1: Shuffled-Sequence Ablation  |  Δ RMSE = {delta:+.4f}  "
+        f"B2_S1: Shuffled-Sequence Ablation  |  Δ RMSE = {delta:+.4f}  "
         f"({delta/np.mean(ordered_rmses)*100:+.1f}%)",
         fontsize=13,
     )
@@ -374,7 +374,7 @@ def plot_results(
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = ROOT / "experiments" / "executions" / "H19" / "S1" / f"{ts}_shuffled_ablation"
+    out_dir = ROOT / "experiments" / "executions" / "B2" / "S1" / f"{ts}_shuffled_ablation"
     for sub in ["metrics", "figures", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -384,10 +384,10 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H19_S1: Shuffled-Sequence Ablation ===")
+    log("=== B2_S1: Shuffled-Sequence Ablation ===")
     log(f"GRU: AC+vT+vS (mask={GRU_MASK}), input_dim={bin(GRU_MASK).count('1')*4+len(META_FEATURES)}")
     log(f"Seeds: {SEEDS}, PCT={PCT}%, LOCV={len(CASE_SCOPE)} cases")
-    log(f"Ordered ref (H17_S1): mean={REF_ORDERED_MEAN}, std={REF_ORDERED_STD}")
+    log(f"Ordered ref (B4_S1): mean={REF_ORDERED_MEAN}, std={REF_ORDERED_STD}")
 
     log("\nLoading data...")
     signal_df  = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
@@ -431,7 +431,7 @@ def main() -> None:
     shuf_cv   = shuf_std / shuf_mean if shuf_mean > 0 else float("nan")
     log(f"  Shuffled 5-seed: mean={shuf_mean:.6f}  std={shuf_std:.6f}  CV={shuf_cv:.4f}")
 
-    # Reference from H17 (use stored per-seed values)
+    # Reference from B4 (use stored per-seed values)
     # Re-run ordered for per-case matrix comparison
     log("\n--- Ordered GRU (for per-case comparison) ---")
     ordered_seed_rmses: list[float] = []
@@ -498,17 +498,17 @@ def main() -> None:
     log("\n=== SUMMARY ===")
     log(f"{'Condition':<20} {'Mean':>10} {'Std':>10} {'CV':>8}")
     log("-" * 52)
-    log(f"{'Ordered (H19)':<20} {ord_mean:>10.6f} {ord_std:>10.6f} {ord_std/ord_mean:>8.4f}")
-    log(f"{'Shuffled (H19)':<20} {shuf_mean:>10.6f} {shuf_std:>10.6f} {shuf_cv:>8.4f}")
+    log(f"{'Ordered (B2)':<20} {ord_mean:>10.6f} {ord_std:>10.6f} {ord_std/ord_mean:>8.4f}")
+    log(f"{'Shuffled (B2)':<20} {shuf_mean:>10.6f} {shuf_std:>10.6f} {shuf_cv:>8.4f}")
     log(f"{'Δ (shuf-ord)':<20} {delta_abs:>+10.6f} {'':<10} {delta_rel:>+7.1f}%")
-    log(f"\nOrdered H17 ref:  mean={REF_ORDERED_MEAN}  std={REF_ORDERED_STD}")
+    log(f"\nOrdered B4 ref:  mean={REF_ORDERED_MEAN}  std={REF_ORDERED_STD}")
 
     log("\nPer-seed delta:")
     for s, o, sh in zip(SEEDS, ordered_seed_rmses, shuffled_seed_rmses):
         log(f"  seed={s}  ordered={o:.6f}  shuffled={sh:.6f}  Δ={sh-o:+.6f}")
 
     summary = {
-        "experiment":   "H19_S1_shuffled_ablation",
+        "experiment":   "B2_S1_shuffled_ablation",
         "ordered": {
             "seed_rmses": ordered_seed_rmses, "mean": ord_mean, "std": ord_std,
         },
@@ -517,8 +517,8 @@ def main() -> None:
         },
         "delta_abs":    delta_abs,
         "delta_rel_pct": delta_rel,
-        "ref_H17_ordered_mean": REF_ORDERED_MEAN,
-        "ref_H17_ordered_std":  REF_ORDERED_STD,
+        "ref_B4_ordered_mean": REF_ORDERED_MEAN,
+        "ref_B4_ordered_std":  REF_ORDERED_STD,
         "execution_dir": str(out_dir),
     }
     (out_dir / "logs" / "summary.json").write_text(

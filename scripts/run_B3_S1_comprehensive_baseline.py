@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H22_S1: Comprehensive Baseline — H18 확장판.
+"""B3_S1: Comprehensive Baseline — H18 확장판.
 
 B3 업데이트. Feature-GRU vs 13종 baseline 모델 종합 비교.
 
@@ -8,25 +8,25 @@ CF       : Carry-forward (no training)          — original H18
 RL       : RunIndex Linear                      — original H18
 ML       : Meta+RunIndex Linear                 — original H18
 DL       : Delta+Meta Linear                    — original H18
-Ridge    : RidgeCV                              — H22 NEW
-RF       : RandomForest (seed-sensitive)        — H22 NEW
-SVR      : SVR RBF kernel                       — H22 NEW
-MLP_Feat : 2-layer MLP [15→128→64→1]           — H22 NEW
+Ridge    : RidgeCV                              — B3 NEW
+RF       : RandomForest (seed-sensitive)        — B3 NEW
+SVR      : SVR RBF kernel                       — B3 NEW
+MLP_Feat : 2-layer MLP [15→128→64→1]           — B3 NEW
 
 ─── Signal-based per-run (raw AC+vT+vS, L timesteps) ──────────────
-SignalCNN: 1D Conv → GlobalAvgPool → head       — H22 NEW
-SignalGRU: GRU over timesteps → last hidden     — H22 NEW
+SignalCNN: 1D Conv → GlobalAvgPool → head       — B3 NEW
+SignalGRU: GRU over timesteps → last hidden     — B3 NEW
 
 ─── Feature-based sequence (Delta+Meta 15-dim over run sequence) ───
-FeatRNN  : RNN(256×3)  + MLP head(32)          — H22 NEW
-FeatLSTM : LSTM(256×3) + MLP head(32)          — H22 NEW
-FeatGRU  : GRU(256×3)  + MLP head(32)          — H22 NEW (re-run for consistency)
+FeatRNN  : RNN(256×3)  + MLP head(32)          — B3 NEW
+FeatLSTM : LSTM(256×3) + MLP head(32)          — B3 NEW
+FeatGRU  : GRU(256×3)  + MLP head(32)          — B3 NEW (re-run for consistency)
 
-─── Reference (from H17) ───────────────────────────────────────────
+─── Reference (from B4) ───────────────────────────────────────────
 XGBoost (per-run): mean=0.109239
 
 Protocol: LOCV 15 cases, observed_vb eval, 5-seed for stochastic models.
-Output: experiments/executions/H22/S1/{timestamp}_comprehensive_baseline/
+Output: experiments/executions/B3/S1/{timestamp}_comprehensive_baseline/
 """
 from __future__ import annotations
 
@@ -70,8 +70,8 @@ THRESH        = 1e6
 N_SENSORS     = len(SENSORS)
 GRU_MASK      = 13   # AC+vT+vS
 
-# References from H17/H18 (XGBoost only; GRU is now re-run for consistency)
-REF = {"XGBoost (H17)": 0.109239}
+# References from B4/H18 (XGBoost only; GRU is now re-run for consistency)
+REF = {"XGBoost (B4)": 0.109239}
 
 # Signal model hyperparams
 SIG_EPOCHS    = 150
@@ -718,7 +718,7 @@ _COLOR_MAP = {
     "FeatLSTM":  "#e8640c",
     "FeatGRU":   "#2ca02c",
     # references
-    "XGBoost (H17)": "#8c564b",
+    "XGBoost (B4)": "#8c564b",
 }
 _DEFAULT_COLOR = "#999999"
 
@@ -747,7 +747,7 @@ def plot_results(model_names, means, stds, out_dir):
     ax.set_xticks(range(len(all_names)))
     ax.set_xticklabels(all_names, rotation=30, ha="right", fontsize=9)
     ax.set_ylabel("Observed-VB RMSE (mean ± std, LOCV)")
-    ax.set_title("H22_S1: Comprehensive Baseline — 13 models vs FeatGRU")
+    ax.set_title("B3_S1: Comprehensive Baseline — 13 models vs FeatGRU")
     ax.legend(fontsize=9)
     ax.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
@@ -766,7 +766,7 @@ def save_checkpoint(results: dict, out_dir: Path) -> None:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = ROOT / "experiments" / "executions" / "H22" / "S1" / f"{ts}_comprehensive_baseline"
+    out_dir = ROOT / "experiments" / "executions" / "B3" / "S1" / f"{ts}_comprehensive_baseline"
     for sub in ["metrics", "figures", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -776,7 +776,7 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H22_S1: Comprehensive Baseline ===")
+    log("=== B3_S1: Comprehensive Baseline ===")
     log("Models: CF, RL, ML, DL, Ridge, RF, SVR, MLP_Feat, SignalCNN, SignalGRU, FeatRNN, FeatLSTM, FeatGRU")
     log(f"Seeds={SEEDS}, PCT={PCT}%, LOCV={len(CASE_SCOPE)} cases")
 
@@ -879,7 +879,7 @@ def main() -> None:
     plot_results(model_names_plot, means_plot, stds_plot, out_dir / "figures")
 
     summary = {
-        "experiment": "H22_S1_comprehensive_baseline",
+        "experiment": "B3_S1_comprehensive_baseline",
         "sig_len": sig_len,
         "seeds": SEEDS,
         "results": {n: {"mean": m, "std": s} for n, (m, s, _) in results.items()},

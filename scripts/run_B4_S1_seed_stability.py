@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""H17_S1: Seed stability experiment — 100% input, 5 seeds.
+"""B4_S1: Seed stability experiment — 100% input, 5 seeds.
+
+(Notion [B4] 5-Seed Stability — 100% 입력 기준; 구 파일명 run_H17_S1_seed_stability.py)
 
 논문 보고 수치의 안정성 검증. Prefix/segmentation 없이 전체 신호(100%) 사용.
 
@@ -10,7 +12,7 @@ T2: XGBoost    — AC+vS   (mask= 9), Delta+Meta 11-dim
 
 Seeds: [0, 1, 2, 3, 4]
 Protocol: LOCV (15 cases), observed_vb eval
-Output: experiments/executions/H17/S1/{timestamp}_seed_stability/
+Output: experiments/executions/B4/S1/{timestamp}_seed_stability/
 """
 from __future__ import annotations
 
@@ -371,7 +373,7 @@ def plot_stability(
     ax.set_title(f"Feature-GRU Per-Case RMSE Distribution ({len(SEEDS)} seeds)")
     ax.grid(True, axis="y", alpha=0.3)
 
-    fig.suptitle(f"H17_S1: Seed Stability — 100% Input, {len(SEEDS)} Seeds", fontsize=13)
+    fig.suptitle(f"B4_S1: Seed Stability — 100% Input, {len(SEEDS)} Seeds", fontsize=13)
     plt.tight_layout()
     fig.savefig(str(out_dir / "seed_stability.png"), dpi=150, bbox_inches="tight")
     fig.savefig(str(out_dir / "seed_stability.svg"), bbox_inches="tight")
@@ -381,7 +383,7 @@ def plot_stability(
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = ROOT / "experiments" / "executions" / "H17" / "S1" / f"{ts}_seed_stability"
+    out_dir = ROOT / "experiments" / "executions" / "B4" / "S1" / f"{ts}_seed_stability"
     for sub in ["metrics", "figures", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -392,7 +394,7 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H17_S1: Seed Stability — 100% Input, 5 Seeds ===")
+    log("=== B4_S1: Seed Stability — 100% Input, 5 Seeds ===")
     log(f"T1: Feature-GRU  mask={GRU_MASK} ({mask_label(GRU_MASK)})  ref_3seed={REF_GRU_3SEED}")
     log(f"T2: XGBoost      mask={XGB_MASK} ({mask_label(XGB_MASK)})  ref_3seed={REF_XGB_3SEED}")
     log(f"PCT={PCT}%, Seeds={SEEDS}, LOCV={len(CASE_SCOPE)} cases")
@@ -528,7 +530,7 @@ def main() -> None:
         log(f"  seed={s}  {r:.6f}")
 
     summary = {
-        "experiment": "H17_S1_seed_stability",
+        "experiment": "B4_S1_seed_stability",
         "pct": PCT,
         "seeds": SEEDS,
         "gru": {
