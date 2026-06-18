@@ -9,6 +9,9 @@ T1: Feature-GRU — AC+vT+vS (mask=13), Delta+Meta 15-dim
     Ref: H12_S1_T1 pct=100% 3-seed mean RMSE=0.095010
 T2: XGBoost    — AC+vS   (mask= 9), Delta+Meta 11-dim
     Ref: H12_S1_T2 pct=100% 3-seed mean RMSE=0.109247
+T3: Cai2020 hybrid LSTM — LSTM(256×3) over 1/2-downsampled raw signal +
+    process[case#, DOC, feed, material, prev-VB] → FC(32,8).
+    Reported with / without prev-VB to isolate the carry-forward term.
 
 Seeds: [0, 1, 2, 3, 4]
 Protocol: LOCV (15 cases), observed_vb eval
@@ -68,6 +71,21 @@ XGB_CFG = dict(
     subsample=0.8, colsample_bytree=0.9,
     gamma=0.0, reg_alpha=0.0, reg_lambda=1.0, n_jobs=4,
 )
+
+# T3: Cai2020 hybrid LSTM (Notion Model DB: cai2020_hybridLSTM).
+#   3-layer LSTM(256) over 1/2-downsampled raw signal, last hidden + process
+#   info -> FC(32,8). Same model as integrated into B3; here measured for
+#   5-seed stability. SIGNAL_SENSORS follows the B3 convention (AC+vT+vS).
+SIGNAL_SENSORS   = ["smcAC", "vib_table", "vib_spindle"]
+CAI_HIDDEN       = 256
+CAI_LAYERS       = 3
+CAI_LSTM_DROPOUT = 0.2
+CAI_HEAD_HID     = (32, 8)
+CAI_HEAD_DROPOUT = 0.2
+CAI_LR           = 1e-3
+CAI_BATCH        = 16
+CAI_EPOCHS       = 200
+CAI_DOWNSAMPLE   = 2     # paper: 1/2 downsampling of the raw run signal
 
 
 # ─── Signal / feature utils ───────────────────────────────────────────────────
@@ -331,28 +349,214 @@ def run_xgb_locv_seed(
     return mean_rmse, case_rmses
 
 
+# ─── T3: Cai2020 hybrid LSTM (signal + process) ───────────────────────────────
+def obs_mask(case_id: int, runs: np.ndarray) -> np.ndarray:
+    return np.array([(case_id, int(r)) not in NON_OBSERVED_RUNS for r in runs])
+
+
+def compute_sig_len(signal_df: pd.DataFrame, proc_clean: pd.DataFrame) -> int:
+    """10th-percentile of per-run minimum signal lengths across SIGNAL_SENSORS."""
+    lengths: list[int] = []
+    for row in proc_clean.itertuples(index=False):
+        case_id, run_id = int(row.case), int(row.run)
+        sig_row = signal_df[(signal_df["case"] == case_id) & (signal_df["run"] == run_id)]
+        if sig_row.empty:
+            continue
+        sr = sig_row.iloc[0]
+        arrays = [parse_signal(sr[s]) for s in SIGNAL_SENSORS]
+        if any(np.abs(a).max() > THRESH for a in arrays):
+            continue
+        lengths.append(min(len(a) for a in arrays))
+    return int(np.percentile(lengths, 10)) if lengths else 1000
+
+
+def build_signal_cache(
+    signal_df: pd.DataFrame, proc_clean: pd.DataFrame, sig_len: int
+) -> dict[tuple[int,int], np.ndarray]:
+    """(case, run) → float32 array of shape (sig_len, len(SIGNAL_SENSORS))."""
+    cache: dict[tuple[int,int], np.ndarray] = {}
+    for row in proc_clean.itertuples(index=False):
+        case_id, run_id = int(row.case), int(row.run)
+        sig_row = signal_df[(signal_df["case"] == case_id) & (signal_df["run"] == run_id)]
+        if sig_row.empty:
+            continue
+        sr = sig_row.iloc[0]
+        arrays = [parse_signal(sr[s]) for s in SIGNAL_SENSORS]
+        if any(np.abs(a).max() > THRESH for a in arrays):
+            continue
+        stacked = np.zeros((sig_len, len(SIGNAL_SENSORS)), dtype=np.float32)
+        for ch, arr in enumerate(arrays):
+            arr = arr[:sig_len].astype(np.float32)
+            stacked[:len(arr), ch] = arr
+        cache[(case_id, run_id)] = stacked
+    return cache
+
+
+def build_process_cache(
+    proc_clean: pd.DataFrame, use_prev_vb: bool
+) -> dict[tuple[int,int], np.ndarray]:
+    """(case, run) → process vector [case#, DOC, feed, material, (prev-run VB)].
+
+    ``use_prev_vb`` toggles the carry-forward prev-run VB term (first run = 0),
+    reported as a separate with/without variant to isolate its contribution.
+    """
+    cache: dict[tuple[int,int], np.ndarray] = {}
+    for case_id, grp in proc_clean.groupby("case"):
+        grp = grp.sort_values("run")
+        vbs = grp["VB"].to_numpy(float)
+        prev = np.concatenate([[0.0], vbs[:-1]])
+        for i, row in enumerate(grp.itertuples(index=False)):
+            feats = [float(case_id), float(row.DOC), float(row.feed), float(row.material)]
+            if use_prev_vb:
+                feats.append(float(prev[i]))
+            cache[(int(case_id), int(row.run))] = np.array(feats, dtype=np.float32)
+    return cache
+
+
+class HybridLSTMModel(nn.Module):
+    """Cai2020 hybrid information model: stacked LSTM over the (downsampled) raw
+    signal, last hidden state concatenated with a process vector, FC(32,8) head."""
+    def __init__(self, n_channels: int, n_process: int) -> None:
+        super().__init__()
+        self.lstm = nn.LSTM(
+            n_channels, CAI_HIDDEN, CAI_LAYERS, batch_first=True,
+            dropout=CAI_LSTM_DROPOUT if CAI_LAYERS > 1 else 0.0)
+        h1, h2 = CAI_HEAD_HID
+        self.head = nn.Sequential(
+            nn.Linear(CAI_HIDDEN + n_process, h1), nn.ReLU(), nn.Dropout(CAI_HEAD_DROPOUT),
+            nn.Linear(h1, h2), nn.ReLU(), nn.Dropout(CAI_HEAD_DROPOUT),
+            nn.Linear(h2, 1),
+        )
+
+    def forward(self, signal: torch.Tensor, process: torch.Tensor) -> torch.Tensor:
+        _, (h, _) = self.lstm(signal)
+        return self.head(torch.cat([h[-1], process], dim=1)).squeeze(-1)
+
+
+def _hybrid_locv(
+    sig_cache: dict[tuple[int,int], np.ndarray],
+    proc_cache: dict[tuple[int,int], np.ndarray],
+    proc_clean: pd.DataFrame,
+    device: torch.device,
+    seed: int,
+    n_process: int,
+) -> tuple[float, dict[int,float]]:
+    from sklearn.preprocessing import StandardScaler
+    n_ch = len(SIGNAL_SENSORS)
+    case_rmses: dict[int,float] = {}
+
+    for tc in CASE_SCOPE:
+        tr_rows = proc_clean[proc_clean["case"] != tc]
+        te_rows = proc_clean[proc_clean["case"] == tc].sort_values("run")
+        if tr_rows.empty or te_rows.empty:
+            continue
+
+        def gather(rows):
+            sigs, procs, vbs, runs = [], [], [], []
+            for row in rows.itertuples(index=False):
+                key = (int(row.case), int(row.run))
+                if key not in sig_cache or key not in proc_cache:
+                    continue
+                sigs.append(sig_cache[key]); procs.append(proc_cache[key])
+                vbs.append(float(row.VB)); runs.append(int(row.run))
+            if not sigs:
+                return None
+            return (np.stack(sigs), np.stack(procs),
+                    np.array(vbs, np.float32), np.array(runs))
+
+        tr, te = gather(tr_rows), gather(te_rows)
+        if tr is None or te is None:
+            continue
+        X_tr, P_tr, y_tr, _       = tr
+        X_te, P_te, y_te, runs_te = te
+
+        # Paper: 1/2 downsampling of the raw run signal
+        X_tr = X_tr[:, ::CAI_DOWNSAMPLE, :]
+        X_te = X_te[:, ::CAI_DOWNSAMPLE, :]
+
+        L = X_tr.shape[1]
+        sig_scaler = StandardScaler().fit(X_tr.reshape(-1, n_ch))
+        X_tr = sig_scaler.transform(X_tr.reshape(-1, n_ch)).reshape(-1, L, n_ch).astype(np.float32)
+        X_te = sig_scaler.transform(X_te.reshape(-1, n_ch)).reshape(-1, L, n_ch).astype(np.float32)
+
+        proc_scaler = StandardScaler().fit(P_tr)
+        P_tr = proc_scaler.transform(P_tr).astype(np.float32)
+        P_te = proc_scaler.transform(P_te).astype(np.float32)
+
+        y_mean, y_std = float(y_tr.mean()), max(float(y_tr.std()), 1e-8)
+
+        torch.manual_seed(seed)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(seed)
+        model = HybridLSTMModel(n_ch, n_process).to(device)
+        opt   = torch.optim.Adam(model.parameters(), lr=CAI_LR)
+        sch   = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=CAI_EPOCHS)
+
+        Xtr_t = torch.tensor(X_tr).to(device)
+        Ptr_t = torch.tensor(P_tr).to(device)
+        ytr_t = torch.tensor((y_tr - y_mean) / y_std).to(device)
+
+        n_train = len(Xtr_t)
+        model.train()
+        for _ in range(CAI_EPOCHS):
+            perm = torch.randperm(n_train)
+            for i in range(0, n_train, CAI_BATCH):
+                idx = perm[i:i+CAI_BATCH]
+                opt.zero_grad()
+                loss = ((model(Xtr_t[idx], Ptr_t[idx]) - ytr_t[idx]) ** 2).mean()
+                loss.backward()
+                opt.step()
+            sch.step()
+
+        model.eval()
+        with torch.no_grad():
+            y_pred = (model(torch.tensor(X_te).to(device),
+                            torch.tensor(P_te).to(device)).cpu().numpy()
+                      * y_std + y_mean)
+        y_pred = np.clip(y_pred, 0.0, None)
+
+        obs = obs_mask(tc, runs_te)
+        if obs.sum() == 0:
+            continue
+        case_rmses[tc] = float(np.sqrt(mean_squared_error(y_te[obs], y_pred[obs])))
+
+    mean_rmse = float(np.mean(list(case_rmses.values()))) if case_rmses else float("nan")
+    return mean_rmse, case_rmses
+
+
+def run_hybrid_lstm(
+    sig_cache: dict[tuple[int,int], np.ndarray],
+    proc_clean: pd.DataFrame,
+    device: torch.device,
+    seed: int,
+    use_prev_vb: bool,
+) -> tuple[float, dict[int,float]]:
+    proc_cache = build_process_cache(proc_clean, use_prev_vb)
+    n_process  = 5 if use_prev_vb else 4
+    return _hybrid_locv(sig_cache, proc_cache, proc_clean, device, seed, n_process)
+
+
 # ─── Plot ─────────────────────────────────────────────────────────────────────
 def plot_stability(
-    gru_seed_rmses: list[float],
-    xgb_seed_rmses: list[float],
+    model_seed_rmses: dict[str, list[float]],
     gru_case_matrix: dict[int, list[float]],
-    xgb_case_matrix: dict[int, list[float]],
     out_dir: Path,
 ) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Left: seed-level aggregate RMSE
+    # Left: seed-level aggregate RMSE (one grouped bar set per model)
     ax = axes[0]
     x = np.arange(len(SEEDS))
-    w = 0.35
-    ax.bar(x - w/2, gru_seed_rmses, w, label=f"Feature-GRU ({mask_label(GRU_MASK)})",
-           color="steelblue", alpha=0.85)
-    ax.bar(x + w/2, xgb_seed_rmses, w, label=f"XGBoost ({mask_label(XGB_MASK)})",
-           color="darkorange", alpha=0.85)
-    ax.axhline(np.mean(gru_seed_rmses), color="steelblue", linestyle="--", linewidth=1.2,
-               label=f"GRU mean={np.mean(gru_seed_rmses):.4f}")
-    ax.axhline(np.mean(xgb_seed_rmses), color="darkorange", linestyle="--", linewidth=1.2,
-               label=f"XGB mean={np.mean(xgb_seed_rmses):.4f}")
+    names = list(model_seed_rmses.keys())
+    n = max(len(names), 1)
+    total_w = 0.8
+    w = total_w / n
+    colors = plt.cm.tab10(np.linspace(0, 1, 10))
+    for i, name in enumerate(names):
+        offset = -total_w / 2 + w * (i + 0.5)
+        rmses = model_seed_rmses[name]
+        ax.bar(x + offset, rmses, w, label=name, color=colors[i % 10], alpha=0.85)
+        ax.axhline(float(np.mean(rmses)), color=colors[i % 10], linestyle="--", linewidth=1.0)
     ax.set_xticks(x)
     ax.set_xticklabels([f"seed {s}" for s in SEEDS])
     ax.set_ylabel("Observed-VB RMSE")
@@ -412,6 +616,11 @@ def main() -> None:
     cache, first_run = build_cache(signal_df, proc_clean)
     log(f"Cache size: {len(cache)} runs")
 
+    log("Building signal cache (Cai2020 raw-signal input)...")
+    sig_len   = compute_sig_len(signal_df, proc_clean)
+    sig_cache = build_signal_cache(signal_df, proc_clean, sig_len)
+    log(f"  sig_len (10th pct)={sig_len}  signal cache: {len(sig_cache)} runs")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"Device: {device}")
 
@@ -466,12 +675,36 @@ def main() -> None:
     log(f"  XGB 5-seed: mean={xgb_mean:.6f}  std={xgb_std:.6f}  CV={xgb_cv:.4f}"
         f"  (3-seed ref={REF_XGB_3SEED:.6f})")
 
+    # ── T3/T4: Cai2020 hybrid LSTM (with / without prev-VB) ──────────────────
+    cai_results: dict[str, dict] = {}
+    for label, use_prev_vb in [("Cai2020", True), ("Cai2020_noPVB", False)]:
+        log(f"\n--- {label}: Cai2020 hybrid LSTM  use_prev_vb={use_prev_vb} ---")
+        seed_rmses: list[float] = []
+        case_matrix: dict[int, list[float]] = {c: [] for c in CASE_SCOPE}
+        t0 = time_mod.time()
+        for seed in SEEDS:
+            mean_rmse, case_rmses = run_hybrid_lstm(sig_cache, proc_clean, device, seed, use_prev_vb)
+            seed_rmses.append(mean_rmse)
+            for c, r in case_rmses.items():
+                case_matrix[c].append(r)
+            log(f"  seed={seed}  RMSE={mean_rmse:.6f}  [{time_mod.time()-t0:.0f}s]")
+        c_mean = float(np.mean(seed_rmses))
+        c_std  = float(np.std(seed_rmses))
+        c_cv   = c_std / c_mean if c_mean > 0 else float("nan")
+        log(f"  {label} 5-seed: mean={c_mean:.6f}  std={c_std:.6f}  CV={c_cv:.4f}")
+        cai_results[label] = {
+            "seed_rmses": seed_rmses, "case_matrix": case_matrix,
+            "mean": c_mean, "std": c_std, "cv": c_cv,
+        }
+
     # ── Save CSVs ─────────────────────────────────────────────────────────────
     # Aggregate seed table
     agg_df = pd.DataFrame({
         "seed": SEEDS,
         "gru_rmse": gru_seed_rmses,
         "xgb_rmse": xgb_seed_rmses,
+        "cai2020_rmse": cai_results["Cai2020"]["seed_rmses"],
+        "cai2020_noPVB_rmse": cai_results["Cai2020_noPVB"]["seed_rmses"],
     })
     agg_df.to_csv(out_dir / "metrics" / "seed_aggregate.csv", index=False)
 
@@ -505,11 +738,32 @@ def main() -> None:
     xgb_case_df = pd.DataFrame(xgb_rows)
     xgb_case_df.to_csv(out_dir / "metrics" / "xgb_per_case.csv", index=False)
 
+    # Per-case tables (Cai2020 variants)
+    for label, info in cai_results.items():
+        cmatrix = info["case_matrix"]
+        rows = []
+        for c in CASE_SCOPE:
+            if not cmatrix[c]:
+                continue
+            row = {"case": c}
+            for i, s in enumerate(SEEDS):
+                row[f"seed{s}"] = cmatrix[c][i] if i < len(cmatrix[c]) else float("nan")
+            vals = [v for v in cmatrix[c] if not np.isnan(v)]
+            row["mean"] = float(np.mean(vals)) if vals else float("nan")
+            row["std"]  = float(np.std(vals))  if vals else float("nan")
+            rows.append(row)
+        pd.DataFrame(rows).to_csv(
+            out_dir / "metrics" / f"{label.lower()}_per_case.csv", index=False)
+
     # ── Plot ──────────────────────────────────────────────────────────────────
     plot_stability(
-        gru_seed_rmses, xgb_seed_rmses,
+        {
+            f"GRU ({mask_label(GRU_MASK)})": gru_seed_rmses,
+            f"XGB ({mask_label(XGB_MASK)})": xgb_seed_rmses,
+            "Cai2020":       cai_results["Cai2020"]["seed_rmses"],
+            "Cai2020_noPVB": cai_results["Cai2020_noPVB"]["seed_rmses"],
+        },
         {c: v for c, v in gru_case_matrix.items() if v},
-        {c: v for c, v in xgb_case_matrix.items() if v},
         out_dir / "figures",
     )
 
@@ -521,6 +775,9 @@ def main() -> None:
         f" {gru_cv:>8.4f} {REF_GRU_3SEED:>12.6f} {gru_mean-REF_GRU_3SEED:>+10.6f}")
     log(f"{'XGB '+mask_label(XGB_MASK):<20} {xgb_mean:>10.6f} {xgb_std:>10.6f}"
         f" {xgb_cv:>8.4f} {REF_XGB_3SEED:>12.6f} {xgb_mean-REF_XGB_3SEED:>+10.6f}")
+    for label, info in cai_results.items():
+        log(f"{label:<20} {info['mean']:>10.6f} {info['std']:>10.6f}"
+            f" {info['cv']:>8.4f} {'—':>12} {'—':>10}")
 
     log("\nGRU per-seed:")
     for s, r in zip(SEEDS, gru_seed_rmses):
@@ -546,6 +803,22 @@ def main() -> None:
             "seed_rmses": xgb_seed_rmses,
             "mean": xgb_mean, "std": xgb_std, "cv": xgb_cv,
             "ref_3seed": REF_XGB_3SEED,
+        },
+        "cai2020": {
+            "signal_sensors": SIGNAL_SENSORS, "sig_len": sig_len,
+            "downsample": CAI_DOWNSAMPLE,
+            "with_prev_vb": {
+                "seed_rmses": cai_results["Cai2020"]["seed_rmses"],
+                "mean": cai_results["Cai2020"]["mean"],
+                "std":  cai_results["Cai2020"]["std"],
+                "cv":   cai_results["Cai2020"]["cv"],
+            },
+            "without_prev_vb": {
+                "seed_rmses": cai_results["Cai2020_noPVB"]["seed_rmses"],
+                "mean": cai_results["Cai2020_noPVB"]["mean"],
+                "std":  cai_results["Cai2020_noPVB"]["std"],
+                "cv":   cai_results["Cai2020_noPVB"]["cv"],
+            },
         },
         "execution_dir": str(out_dir),
     }
