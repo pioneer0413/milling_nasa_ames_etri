@@ -8,7 +8,9 @@ idx_start(steady 경계) 오염 이슈([B1], 2026-06-23 미해결)로 이번 실
   Full         : [0, signal_length)            — 경계 의존 없음
   Exclude-exit : [0, idx_exit_start)            — idx_exit_start만 의존 (idx_start 무관, 안전)
 
-피처: Delta+Meta (AC+vT+vS, mask=13, 15-dim) — I1_S1/S2에서 확정된 구성을 4종 모델에 동일 적용.
+피처: Delta+Meta (All sensors, mask=63, 27-dim) — 2026-06-22 사용자 지시: 센서 subset(AC+vT+vS)
+대신 전체 6센서를 4종 모델(FeatGRU 포함)에 동일 적용해 sensor selection을 segment 비교의
+confound에서 제외한다.
 평가: LOCV 15 cases, observed-VB-only RMSE.
   - 확률적 모델(FeatGRU/FeatLSTM/RandomForest): 5-seed mean±std
   - 결정론적 모델(XGBoost): 1회 실행
@@ -55,13 +57,13 @@ META_FEATURES = ["DOC", "feed", "material"]
 SEEDS         = [0, 1, 2, 3, 4]
 THRESH        = 1e6
 N_SENSORS     = len(SENSORS)
-MASK          = 13   # AC+vT+vS
+MASK          = 63   # All sensors: smcAC+smcDC+vib_table+vib_spindle+AE_table+AE_spindle (2026-06-22 user directive)
 SEGMENTS      = ["Full", "Exclude_exit"]   # Entry/Steady/Entry+Steady deferred (idx_start contamination)
 MODELS        = ["FeatGRU", "FeatLSTM", "XGBoost", "RandomForest"]
 STOCHASTIC    = {"FeatGRU", "FeatLSTM", "RandomForest"}   # 5-seed; XGBoost = 1-run
 
-REF_FULL_GRU_RMSE = 0.095010   # H12_S1, prefix=100%
-REF_FULL_XGB_RMSE = 0.109247   # H12_S1, prefix=100%
+REF_FULL_GRU_RMSE = 0.114839   # I1_S2, All sensors, Delta+Meta, prefix=100%
+REF_FULL_XGB_RMSE = None       # no prior All-sensors XGBoost reference
 
 RNN_CFG = dict(
     hidden_size=256, num_layers=3, dropout=0.1, head_hidden=32,
@@ -344,7 +346,7 @@ def plot_results(results: dict[str, dict[str, dict]], out_dir: Path) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(SEGMENTS)
     ax.set_ylabel("Observed-VB RMSE")
-    ax.set_title("B2_S1: Segment Ablation — Full vs Exclude-exit (AC+vT+vS, Delta+Meta)")
+    ax.set_title("B2_S1: Segment Ablation — Full vs Exclude-exit (All sensors, Delta+Meta)")
     ax.legend(fontsize=9)
     ax.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
@@ -437,7 +439,7 @@ def main() -> None:
         excl_mean  = results[m]["Exclude_exit"]["mean"]
         log(f"{m:<14} {full_mean:>12.6f} {excl_mean:>14.6f} {excl_mean-full_mean:>+14.6f}")
 
-    log(f"\nRef (H12_S1, Full, AC+vT+vS): GRU={REF_FULL_GRU_RMSE}, XGB={REF_FULL_XGB_RMSE}")
+    log(f"\nRef (I1_S2, Full, All sensors): GRU={REF_FULL_GRU_RMSE} (no established XGB/RF ref under all-sensors)")
     log(f"This run Full: GRU={results['FeatGRU']['Full']['mean']:.6f}, XGB={results['XGBoost']['Full']['mean']:.6f}")
 
     best_overall = min(
