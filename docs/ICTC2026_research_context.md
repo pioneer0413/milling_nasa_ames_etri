@@ -2,7 +2,7 @@
 
 ICTC 2026 논문 작업의 Notion 마스터 페이지와 하위 페이지 맥락을 repo에 고정한 문서.
 어느 디바이스에서 clone해도 연구 배경/가설/도메인 지식을 Notion 접근 없이 파악할 수 있게 한다.
-(스냅샷 기준일: 2026-06-16. Notion이 최신 원본이며, 본 문서는 요약·맥락 보존용.)
+(스냅샷 기준일: 2026-06-22. Notion이 최신 원본이며, 본 문서는 요약·맥락 보존용.)
 
 ## 0. 페이지 맵
 
@@ -71,8 +71,36 @@ ICTC 2026 논문 작업의 Notion 마스터 페이지와 하위 페이지 맥락
 - NASA: 15 cases / LOCV 15 folds, 종속변수 VB. PHM2010: 3 cases / LOCV 3 folds, 종속변수 VB_max.
 
 ### 실험 DB (Run-sequence Modeling 워크스페이스)
-- **Run-sequence Modeling** DB: 활성 실험 (B/I/E class). 예) [B1] PHM2010 Feature baseline, [E5] 하이퍼파라미터 튜닝.
+- **Run-sequence Modeling** DB: 활성 실험 (B/I/E class). B(Baseline) 4건, I(Investigation) 5건, E(Extension/Evaluation) 7건. 옛 H1~H9 가설 번호는 Archive로 이동했으며, 일부는 이 체계로 재편됨(예: 구 H7 Case1/Case12 분석 → E3/E4).
 - **Analysis** DB: 분석 노트, Run-sequence Modeling과 관계형 연결. 예) "PHM2010에서 run-sequence가 run-independent에 뒤지는 이유".
+- **Model** DB: 모델 정의/설정 카탈로그, Run-sequence Modeling과 관계형 연결.
+
+### 3단계 confound-free 검증 구조 (2026-06-22 사용자 재구성)
+
+Segment-aware 입력 선택과 Run-sequence Modeling을 독립적인 두 기여 요인으로 분리 입증하기 위해 **B1/B2/B3을 새로 정의**(Outline → Method Overview에도 동일 구조 기록):
+
+| 단계 | 항목 | Goal (현재 Notion 원문) | 상태 |
+|---|---|---|---|
+| 1) Segment × Model | **[B1] Model x (Entry-Steady)** | Entry-Steady 입력(Feature, Raw signal)에 대해 모든 모델(CF/Ridge/RF/XGBoost/SVR/Feature-MLP/Feature-GRU·LSTM/Signal-CNN/Signal-GRU·LSTM) 간 성능 비교 | 시작 전 (계획 작성됨; 10개 모델 **전부** 신규 실행 필요 — Carry-forward 제외, 아래 Steady 오염 항목 참고) |
+| 2) Segment-ablation | **[B2] Ablation: Segment** | 모델을 FeatGRU/LSTM·XGBoost·RF로 고정하고 Segment(Full/Exclude No-load/Entry/Entry-steady/Steady)별 성능 비교 | 시작 전 (내용 비어있음) |
+| 3) Model-comparison | **[B3] Comparison: Model** | Segment=Full 고정, Feature-based GRU/LSTM·Signal-based GRU/LSTM 간 성능 비교 | 시작 전 (내용 비어있음, 비-시퀀스 baseline 미포함) |
+
+**Segment 정의 단일화 (2026-06-22 결정, 해결됨)**: segment 인덱스 파일 난립 문제 해소 — 이후 모든 B/I/E 실험은 **`datasets/nasa/cutting_segment_index.csv` 단일 파일**만 사용하고 Steady/Steady_v2 구분을 폐지한다. 컬럼 기반 정의: `Full=[0, signal_length)`, `Excl_Exit=[0, idx_exit_start)`, `Entry_Steady=[idx_noload_end, idx_exit_start)`, `Steady=[idx_start, idx_exit_start)`(`idx_exit_start` = peng2026_inspired exit 검출 경계만 사용). [B1]/[B2]의 `Exclude No-load`/`Entry-steady` 등 명칭은 이 4종 중 하나로 매핑해서 통일.
+
+**Steady 경계 오염 — Entry_Steady 결과 전면 폐기 (2026-06-23)**: cutting_segment_index.csv 단일화 과정에서 기존 `idx_start`(Steady 시작 경계)가 오염된 것으로 확인됨. [I3] Stage A/C의 Entry_Steady/Steady/Steady_v2 RMSE(0.083903, 0.086679, 0.118339, 0.144295, 0.119317, 0.141702 등)는 전부 폐기 — 인용·재사용 금지. [B1]의 "재사용 가능한 기존 결과"에서 Feature-GRU/LSTM 항목 제거, 신규 실행 목록으로 이동(Carry-forward만 영향 없음). [I4]에도 동일 경고 반영됨. 경계 정리 후 [B1]/[I3]/[I4] 전체 재실행 필요.
+
+**남은 미해결 항목**:
+- [B3] Goal에 RF/XGBoost/SVR/MLP/SignalCNN 등 비-시퀀스 baseline이 빠져 있음 — "Model-comparison" 역할을 채우려면 추가 필요.
+- 기존 [I3]/[I4]는 그대로 유지된 채 새 B1/B2/B3과 역할이 겹침(I4의 Entry_Steady 열 ≈ B1, I3 Stage A ≈ B2 일부, 구 B3 종합 baseline ≈ B3) — 통합 또는 역할 분담 정리 필요.
+
+### ⚠️ 데이터 보존 경고: 구 [B3]/[B4] 페이지 삭제(trash)됨
+
+번호 재배치 과정에서 기존 두 페이지가 Notion에서 **삭제(trash) 처리**됨(`<page ... deleted>` 상태로만 fetch 가능, 휴지통 보존기간 내 복구 가능):
+- 구 **[B3] Naive Baseline — Carry-Forward & Linear Models**: 13개 모델 종합 비교(FeatGRU 0.0951, FeatLSTM 0.0922, RF 0.1292, XGBoost ref 0.1092, Cai2020 0.0626 등) + 한계/TODO 전체.
+- 구 **[B4] 5-Seed Stability**: H17_S1 + H22_S1 확장 결과(FeatLSTM/RF/MLP_Feat/SignalCNN 5-seed CV 표).
+- 새 **[B4]**는 구 [B2] Shuffled-Sequence Ablation 자리를 재사용한 것이며, 상태가 "완료"→**"시작 전"으로 리셋**됨(2026-06-22, 사용자 확인).
+
+위 두 페이지의 수치는 본 문서 §4·§3(배제 접근)에 이미 반영되어 있어 정보 자체는 보존되지만, **Notion 원본 페이지로서는 사라진 상태** — 새 [B3] Comparison: Model을 채울 때 이 데이터를 가져와 재사용하는 것을 권장.
 
 ### Performance Objective (현재 best)
 | 데이터셋 | 목표 (LOCV RMSE) | 달성 | Best |
@@ -81,6 +109,26 @@ ICTC 2026 논문 작업의 Notion 마스터 페이지와 하위 페이지 맥락
 | PHM2010 | ≤ 10 µm | No | FeatLSTM 22.04 (raw feature 기준) |
 
 > 단, E5_S1(Delta feature)에서 PHM2010 sequence 모델이 RF를 역전 (FeatLSTM delta 20.23 / FeatGRU raw+delta 20.39µm) — 본 repo 실험 라인 참조.
+
+### NASA 앙상블 라인 (B5 / B6)
+
+단일 모델 한계를 넘기 위한 앙상블 실험. 모두 LOCV-15 observed-VB-only RMSE.
+
+| 실험 | 방법 | RMSE | 비고 |
+|---|---|---|---|
+| B5_S2 | 4-ML 단순 평균 (own-best subset) | 0.103189 | ML만 |
+| B5_S3 | FeatGRU 메타러너 스태킹 | — | nested-LOCV |
+| **B6_S1** | **ID-SWE (E0 평균 앙상블)** | **0.096644** | GRU+LSTM+XGB+RF+SVR, 5종 평균 |
+| B6_S1 | ID-SWE E2/E3 (disagreement 적응 가중) | 0.096961 / 0.097612 | **E0와 동률 — 게이팅 무이득** |
+
+> **B6_S1 결론 (네거티브/중립)**: disagreement 기반 적응 게이팅(E2/E3)이 단순 평균(E0) 대비 개선 없음. 원인 = 이 구성의 sequence base(GRU 0.116/LSTM 0.118)가 ML(XGB/SVR 0.109)보다 약한데 게이트 가중 `w∈[0.40,0.75]`이 sequence를 항상 우대해 약한 그룹을 과신. 단, E3(median-other)는 late-phase·Case 1/12/13에서 소폭 우위로 "후반 과상승 억제" 방향성은 일부 확인. 5종 평균 앙상블 자체는 모든 단일 base 및 B5_S2(0.1032)를 능가하나 튜닝 단일 best(FeatLSTM 0.0922)에는 못 미침. 스크립트: `scripts/run_B6_S1_inverse_disagreement_sequence_weighted_ensemble.py`.
+
+### 비교 대상에서 배제된 접근 (2026-06-22 결정)
+
+수치상 더 낮은 RMSE를 보였더라도 아래 두 가지는 메인 leaderboard/논문 비교에서 배제한다:
+
+- **Prefix 비율 고정값 (H12~H16, 예: GRU prefix=80% → 0.081977)**: sweep 결과 인접 비율(70%→0.098, 90%→0.093)과 단절된 단일 지점이며, 고정 상수가 다른 공정조건·신호 길이에 일반화된다는 보장이 없어 실제 배포 환경에 부적합. Segment-aware(entry/steady/exit 식별) 대안도 현재 구현(I3/I4)에서는 동등 비교가 끝나지 않은 상태.
+- **Cai2020 hybrid LSTM (RMSE 0.0626, 1-seed)**: 이전 run의 **실측(ground-truth) VB**를 test 시에도 입력 feature로 사용하는 구조 — 실제 배포 시점에는 알 수 없는 값을 안다고 가정하는 비현실적 설정이므로 배제. 이 모델 제외 후 NASA 공식 best는 FeatLSTM 0.092217로 유지된다. (원 기록처였던 Notion 구-[B3] 페이지는 2026-06-22 번호 재배치 중 삭제됨 — §3 "데이터 보존 경고" 참고)
 
 ---
 
@@ -93,8 +141,14 @@ ICTC 2026 논문 작업의 Notion 마스터 페이지와 하위 페이지 맥락
 - **어려운 Case**: Case 13/14(신호 패턴 상이 → 난이도↑), Case 1/12 근본 원인은 H7_S1에서 규명:
   - **Case 1**: 유일한 non-monotone VB 궤적(Run15 peak→Run17 감소) → GRU 단조증가만 학습 → 파국적 오차. GRU/XGB 3.1배. (피처 문제 아님, OOD 아님)
   - **Case 12**: Delta baseline 분포 편이(`(12,1)` 제외로 기준=Run2 VB=0.05) → 두 모델 동등 실패 = 피처 파이프라인 결함.
+- **누적 절삭 시간(time) meta feature는 기여 없음** (H8_S1~S3, 2026-06-12, `scripts/run_H8_S{1,2,3}_*.py`):
+  - `time_norm`(case-wise 정규화) 추가 시 GRU −6.89%/XGB −11.43% 개선되어 보였으나, leakage 효과로 확인됨(case 마지막 런 시간을 알아야 계산 가능).
+  - leakage-free 버전인 `raw_time`/`elapsed_time`은 GRU +54.8%/+60.0% 악화, XGB는 무변화 — 시간 정보는 실질 신호 없음.
+  - **결론**: `{DOC, feed, material}` 3개 meta feature로 충분, time 계열 추가 불필요.
+- **표현학습 PoC 진행 중 ([I5], 보완 필요)**: VB-feature locality 비대칭(VB→feature corr 0.595, 약함) 보강을 위해 FiLM conditioning + Rank-N-Contrast(RNC) 구현·smoke test 통과. I3 best(FeatGRU 0.0839 @ Entry_Steady)의 0.080 돌파 목표 — **단, 이 0.0839 수치는 2026-06-23 폐기됨(아래 참고), 목표 기준 재확정 필요**. LOCV 실측은 아직 미수행. **FiLM 부분은 PoC를 넘어 정식 모델로 코드화됨** — `feature_film_gru`(메타 전용 FiLM, signal feature는 불변)가 `feature_gru_regressor.py`/`h2_regressors.py`에 등록되고 유닛테스트 통과(`run_H4_S5_feature_film_gru_segments.py`, `run_H4_S5_feature_gru_hpo.py --use_metadata_film`).
+- **⚠️ Entry_Steady 결과 전부 폐기 (2026-06-23)**: [I3] Stage A/C에서 사용한 Steady 경계(`idx_start`)가 오염된 것으로 확인됨. Entry_Steady/Steady/Steady_v2 관련 모든 RMSE(0.083903, 0.086679, 0.118339, 0.144295, 0.119317, 0.141702 등)는 인용·재사용 금지. `datasets/nasa/cutting_segment_index.csv` 기준으로 [B1]/[I3]/[I4] 전체 재실행 필요. [B1]의 "재사용 가능한 기존 결과"에서 Feature-GRU/LSTM 항목은 제거되고 신규 실행 목록으로 이동함(Carry-forward만 segment 비의존이라 영향 없음).
 - **실시간성(향후)**: 전체 cut 신호 입력 → cut 완료 후 예측. 실제 공정은 다음 cut 전 교체 결정 필요 → cut 간격 내 추론 성능도 만족해야 함.
-- Heuristic Segmentation Algorithm **V1**(window L=256, no-load/steady end·start 검출) / **V2**(target smcDC, w=300/stride=100, exit-cut 식별) 기록 존재.
+- **Segment 정의 단일화 (2026-06-22 결정)**: segment 관련 인덱스 파일이 V1/V2 등으로 난립해 혼선이 있었음 → **`datasets/nasa/cutting_segment_index.csv` 단일 파일만 사용**, Steady/Steady_v2 구분 폐지. 컬럼 기반 정의: `Full=[0, signal_length)`, `Excl_Exit=[0, idx_exit_start)`, `Entry_Steady=[idx_noload_end, idx_exit_start)`, `Steady=[idx_start, idx_exit_start)` — `idx_exit_start`(peng2026_inspired exit 검출)만 사용, 옛 `idx_end`/V1 경계는 더 이상 segment 정의에 쓰지 않음.
 - 관련 연구 비교표(Ghosh 2007, García-Nieto 2016, Cai 2020, Karabacak 2024, Zhang 2021, Jeon&Rhee 2024, Li 2025 TCN-BiGRU-SA, Peng 2025 PINN 등) 보유.
 
 ---
@@ -112,8 +166,8 @@ ICTC 2026 논문 작업의 Notion 마스터 페이지와 하위 페이지 맥락
 ## 6. 본 repo 실험과의 연결
 
 Notion 실험 DB의 PHM2010 라인은 본 repo에서 재현 가능:
-- `scripts/run_B1_S1_phm2010_feature_baseline.py` — [B1] 9-model LOCV-3 baseline.
-- `scripts/run_B1_S2_phm2010_flute_augment.py` — flute-label 증강(궤적 2→6).
+- `scripts/run_B1_S1_phm2010_feature_baseline.py` — 9-model LOCV-3 baseline. **주의**: 파일명의 "B1"은 옛 번호(스크립트 작성 시점). 2026-06-22 Notion 재배치로 현재는 **[E7] PHM2010 Feature-GRU LOCV 실행**에 해당 — 새 Notion [B1]은 NASA "Model x (Entry-Steady)"로 의미가 다름.
+- `scripts/run_B1_S2_phm2010_flute_augment.py` — flute-label 증강(궤적 2→6). 위와 동일하게 파일명 번호는 옛 [B1](현 [E7]) 기준.
 - `scripts/run_E5_S1_phm2010_delta_feature.py` — [E5] Delta feature 비대칭 해소(sequence가 RF 역전).
 
 NASA 라인(H 시리즈)은 `datasets/nasa/raw_signal.csv`(gitignored)가 필요. 자세한 데이터 가용성은 `README.md` 참조.
