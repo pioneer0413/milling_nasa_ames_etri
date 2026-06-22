@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 from xgboost import XGBRegressor
 
-from milling_experiment_framework.models.dl.feature_gru_regressor import FeatureGRURegressor
+from milling_experiment_framework.models.dl.feature_gru_regressor import FeatureFiLMGRURegressor, FeatureGRURegressor
 
 
 H2_MODEL_FAMILIES = {
@@ -26,6 +26,7 @@ H2_MODEL_FAMILIES = {
     "linear_regression": "Feature-based ML",
     "mlp": "Neural Network",
     "feature_gru": "Neural Network",
+    "feature_film_gru": "Neural Network",
 }
 
 
@@ -47,6 +48,11 @@ H2_MODEL_ALIASES = {
     "gru": "feature_gru",
     "feature-based_gru": "feature_gru",
     "feature_based_gru": "feature_gru",
+    "film_gru": "feature_film_gru",
+    "filmgru": "feature_film_gru",
+    "feat_film_gru": "feature_film_gru",
+    "feature-based_film_gru": "feature_film_gru",
+    "feature_based_film_gru": "feature_film_gru",
 }
 
 
@@ -106,6 +112,22 @@ H2_DEFAULT_MODEL_PARAMS: dict[str, dict[str, Any]] = {
         "validation_fraction": 0.0,
         "device": "cpu",
     },
+    "feature_film_gru": {
+        "gru_hidden_size": 32,
+        "gru_num_layers": 1,
+        "regression_head_hidden_dim": 32,
+        "dropout": 0.0,
+        "metadata_feature_dim": 3,
+        "film_hidden_dim": None,
+        "film_dropout": 0.0,
+        "epochs": 200,
+        "batch_size": 16,
+        "learning_rate": 0.001,
+        "weight_decay": 0.0,
+        "patience": 0,
+        "validation_fraction": 0.0,
+        "device": "cpu",
+    },
 }
 
 
@@ -131,6 +153,10 @@ class H2FeatureGRUEstimator(BaseEstimator, RegressorMixin):
         validation_fraction: float = 0.0,
         device: str = "cpu",
         random_state: int | None = None,
+        use_metadata_film: bool = False,
+        metadata_feature_dim: int = 3,
+        film_hidden_dim: int | None = None,
+        film_dropout: float = 0.0,
     ) -> None:
         self.gru_hidden_size = gru_hidden_size
         self.gru_num_layers = gru_num_layers
@@ -144,6 +170,10 @@ class H2FeatureGRUEstimator(BaseEstimator, RegressorMixin):
         self.validation_fraction = validation_fraction
         self.device = device
         self.random_state = random_state
+        self.use_metadata_film = use_metadata_film
+        self.metadata_feature_dim = metadata_feature_dim
+        self.film_hidden_dim = film_hidden_dim
+        self.film_dropout = film_dropout
 
     def fit(self, X, y):
         x = self._as_float_array(X)
@@ -163,13 +193,23 @@ class H2FeatureGRUEstimator(BaseEstimator, RegressorMixin):
         self.y_std_ = y_std if y_std > 1e-8 else 1.0
         y_norm = ((target - self.y_mean_) / self.y_std_).astype("float32")
 
-        self.model_ = FeatureGRURegressor(
-            input_dim=x.shape[1],
-            gru_hidden_size=int(self.gru_hidden_size),
-            gru_num_layers=int(self.gru_num_layers),
-            regression_head_hidden_dim=int(self.regression_head_hidden_dim),
-            dropout=float(self.dropout),
-        ).to(device)
+        model_cls = FeatureFiLMGRURegressor if bool(self.use_metadata_film) else FeatureGRURegressor
+        model_kwargs = {
+            "input_dim": x.shape[1],
+            "gru_hidden_size": int(self.gru_hidden_size),
+            "gru_num_layers": int(self.gru_num_layers),
+            "regression_head_hidden_dim": int(self.regression_head_hidden_dim),
+            "dropout": float(self.dropout),
+        }
+        if bool(self.use_metadata_film):
+            model_kwargs.update(
+                {
+                    "metadata_feature_dim": int(self.metadata_feature_dim),
+                    "film_hidden_dim": None if self.film_hidden_dim is None else int(self.film_hidden_dim),
+                    "film_dropout": float(self.film_dropout),
+                }
+            )
+        self.model_ = model_cls(**model_kwargs).to(device)
         self.input_dim_ = int(x.shape[1])
 
         indices = np.arange(len(x))
@@ -272,7 +312,7 @@ def resolve_h2_model_defaults(model_defaults: dict[str, dict[str, Any]] | None =
 def create_h2_regressor(model_name: str, seed: int, model_defaults: dict[str, dict[str, Any]] | None = None):
     name = canonical_model_name(model_name)
     params = resolve_h2_model_params(name, model_defaults)
-    if name in {"random_forest", "extra_trees", "xgboost", "lightgbm", "mlp", "feature_gru"}:
+    if name in {"random_forest", "extra_trees", "xgboost", "lightgbm", "mlp", "feature_gru", "feature_film_gru"}:
         params.setdefault("random_state", seed)
     if name == "random_forest":
         return RandomForestRegressor(**params)
@@ -293,6 +333,9 @@ def create_h2_regressor(model_name: str, seed: int, model_defaults: dict[str, di
     if name == "mlp":
         return MLPRegressor(**params)
     if name == "feature_gru":
+        return H2FeatureGRUEstimator(**params)
+    if name == "feature_film_gru":
+        params.setdefault("use_metadata_film", True)
         return H2FeatureGRUEstimator(**params)
     raise ValueError(f"Unsupported H2 model: {model_name}")
 
@@ -321,6 +364,7 @@ def h2_model_catalog(model_defaults: dict[str, dict[str, Any]] | None = None) ->
                 "linear_regression": "sklearn.linear_model.LinearRegression",
                 "mlp": "sklearn.neural_network.MLPRegressor",
                 "feature_gru": "milling_experiment_framework.models.dl.feature_gru_regressor.FeatureGRURegressor",
+                "feature_film_gru": "milling_experiment_framework.models.dl.feature_gru_regressor.FeatureFiLMGRURegressor",
             }[name],
             "input_type": "tabular feature vector",
             "pipeline": "StandardScaler -> estimator",

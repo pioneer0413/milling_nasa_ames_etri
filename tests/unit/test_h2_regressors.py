@@ -23,6 +23,14 @@ def test_h2_feature_pipelines_fit_and_predict():
         "xgboost": {"n_estimators": 5, "max_depth": 2, "n_jobs": 1},
         "mlp": {"hidden_layer_sizes": (8,), "max_iter": 20},
         "feature_gru": {"gru_hidden_size": 8, "regression_head_hidden_dim": 8, "epochs": 3, "patience": 2},
+        "feature_film_gru": {
+            "gru_hidden_size": 8,
+            "regression_head_hidden_dim": 8,
+            "metadata_feature_dim": 2,
+            "film_hidden_dim": 8,
+            "epochs": 3,
+            "patience": 2,
+        },
     }
     for model_name in supported_h2_models():
         model = create_h2_feature_pipeline(model_name, seed=3, model_defaults=defaults)
@@ -54,6 +62,14 @@ def test_h2_process_style_pipeline_fit_and_predict():
         "xgboost": {"n_estimators": 5, "max_depth": 2, "n_jobs": 1},
         "mlp": {"hidden_layer_sizes": (8,), "max_iter": 30},
         "feature_gru": {"gru_hidden_size": 8, "regression_head_hidden_dim": 8, "epochs": 3, "patience": 2},
+        "feature_film_gru": {
+            "gru_hidden_size": 8,
+            "regression_head_hidden_dim": 8,
+            "metadata_feature_dim": 2,
+            "film_hidden_dim": 8,
+            "epochs": 3,
+            "patience": 2,
+        },
     }
     for model_name in supported_h2_models():
         model = Pipeline([("preprocess", preprocessor), ("model", create_h2_regressor(model_name, seed=5, model_defaults=defaults))])

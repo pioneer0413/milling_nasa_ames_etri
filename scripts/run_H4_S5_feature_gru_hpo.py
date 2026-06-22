@@ -136,8 +136,40 @@ class DeltaMetaGRU(nn.Module):
     def __init__(
         self, input_dim: int, hidden_size: int, num_layers: int,
         dropout: float, head_hidden: int,
+        use_metadata_film: bool = False,
+        metadata_feature_dim: int = 3,
+        film_hidden_dim: int | None = None,
+        film_dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        self.input_dim = int(input_dim)
+        self.use_metadata_film = bool(use_metadata_film)
+        self.metadata_feature_dim = int(metadata_feature_dim)
+        if self.use_metadata_film:
+            if self.metadata_feature_dim <= 0:
+                raise ValueError(f"metadata_feature_dim must be > 0, got {metadata_feature_dim}")
+            if self.metadata_feature_dim >= self.input_dim:
+                raise ValueError(
+                    "metadata_feature_dim must be smaller than input_dim so signal features remain unmodified: "
+                    f"input_dim={input_dim}, metadata_feature_dim={metadata_feature_dim}"
+                )
+            self.signal_feature_dim = self.input_dim - self.metadata_feature_dim
+            film_hidden = int(film_hidden_dim or max(8, self.metadata_feature_dim * 4))
+            film_layers: list[nn.Module] = [
+                nn.Linear(self.signal_feature_dim, film_hidden),
+                nn.ReLU(),
+            ]
+            if float(film_dropout) > 0.0:
+                film_layers.append(nn.Dropout(float(film_dropout)))
+            film_layers.append(nn.Linear(film_hidden, self.metadata_feature_dim * 2))
+            self.metadata_film = nn.Sequential(*film_layers)
+            last = self.metadata_film[-1]
+            if isinstance(last, nn.Linear):
+                nn.init.zeros_(last.weight)
+                nn.init.zeros_(last.bias)
+        else:
+            self.signal_feature_dim = self.input_dim - self.metadata_feature_dim
+            self.metadata_film = None
         self.gru = nn.GRU(
             input_dim, hidden_size, num_layers, batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
@@ -146,7 +178,18 @@ class DeltaMetaGRU(nn.Module):
             nn.Linear(hidden_size, head_hidden), nn.ReLU(), nn.Linear(head_hidden, 1)
         )
 
+    def apply_metadata_film(self, x: torch.Tensor) -> torch.Tensor:
+        if self.metadata_film is None:
+            return x
+        signal_features = x[..., : self.signal_feature_dim]
+        metadata_features = x[..., self.signal_feature_dim :]
+        gamma_beta = self.metadata_film(signal_features)
+        gamma, beta = gamma_beta.chunk(2, dim=-1)
+        modulated_metadata = metadata_features * (1.0 + gamma) + beta
+        return torch.cat([signal_features, modulated_metadata], dim=-1)
+
     def forward(self, x: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        x = self.apply_metadata_film(x)
         packed = nn.utils.rnn.pack_padded_sequence(
             x, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
@@ -182,6 +225,10 @@ def fit_predict_gru(
         input_dim=input_dim, hidden_size=cfg["hidden_size"],
         num_layers=cfg["num_layers"], dropout=cfg["dropout"],
         head_hidden=cfg["head_hidden"],
+        use_metadata_film=bool(cfg.get("use_metadata_film", False)),
+        metadata_feature_dim=int(cfg.get("metadata_feature_dim", len(META_FEATURES))),
+        film_hidden_dim=cfg.get("film_hidden_dim"),
+        film_dropout=float(cfg.get("film_dropout", 0.0)),
     ).to(device)
     optimizer = torch.optim.Adam(
         model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"]
@@ -261,6 +308,27 @@ BASE = dict(
     hidden_size=256, num_layers=3, dropout=0.1, head_hidden=16,
     lr=1e-3, weight_decay=1e-4, epochs=200, grad_clip=1.0, scheduler="cosine",
 )
+MODEL_CHOICES = ("feature_gru", "feature_film_gru")
+
+
+def with_model_options(
+    cfg: dict,
+    model_type: str,
+    film_hidden_dim: int | None = None,
+    film_dropout: float = 0.0,
+) -> dict:
+    model_cfg = {**cfg, "model_type": model_type}
+    if model_type == "feature_film_gru":
+        model_cfg.update(
+            {
+                "use_metadata_film": True,
+                "metadata_feature_dim": len(META_FEATURES),
+                "film_dropout": float(film_dropout),
+            }
+        )
+        if film_hidden_dim is not None:
+            model_cfg["film_hidden_dim"] = int(film_hidden_dim)
+    return model_cfg
 
 
 def build_config_list() -> list[dict]:
@@ -341,6 +409,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="H4_S5 feature_gru hyperparameter optimization.")
     p.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     p.add_argument("--prefix", type=int, default=BASE_PREFIX)
+    p.add_argument("--model", choices=MODEL_CHOICES, default="feature_gru")
+    p.add_argument("--film-hidden-dim", type=int, default=None)
+    p.add_argument("--film-dropout", type=float, default=0.0)
     p.add_argument("--only", nargs="+", default=None, help="Run only these config names.")
     p.add_argument("--refine", action="store_true", help="Stage-2: run combined winning configs.")
     p.add_argument("--smoke", action="store_true", help="Baseline only, 1 seed, for timing.")
@@ -351,7 +422,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = ROOT / args.output_root / "H4" / "S5" / f"{timestamp}_feature_gru_hpo"
+    out_dir = ROOT / args.output_root / "H4" / "S5" / f"{timestamp}_{args.model}_hpo"
     for sub in ["configs", "metrics", "analysis", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -368,8 +439,12 @@ def main() -> None:
         configs = [c for c in build_config_list() if c["name"] == "baseline_rank1"]
     elif args.only:
         configs = [c for c in configs if c["name"] in set(args.only)]
+    configs = [
+        with_model_options(c, args.model, args.film_hidden_dim, args.film_dropout)
+        for c in configs
+    ]
 
-    log(f"=== H4_S5 feature_gru HPO === prefix={args.prefix}% seeds={seeds} configs={len(configs)}")
+    log(f"=== H4_S5 {args.model} HPO === prefix={args.prefix}% seeds={seeds} configs={len(configs)}")
 
     log("Loading data...")
     signal_df = pd.read_csv(
@@ -389,6 +464,7 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"Device: {device}")
+    seed_label = f"{len(seeds)}-seed"
 
     per_case_rows: list[dict] = []
     seed_rows: list[dict] = []
@@ -412,6 +488,11 @@ def main() -> None:
             per_case_rows.extend(df.to_dict("records"))
         rec = {
             "config": cfg["name"],
+            "model_type": cfg.get("model_type", "feature_gru"),
+            "use_metadata_film": bool(cfg.get("use_metadata_film", False)),
+            "metadata_feature_dim": int(cfg.get("metadata_feature_dim", 0)),
+            "film_hidden_dim": cfg.get("film_hidden_dim"),
+            "film_dropout": float(cfg.get("film_dropout", 0.0)),
             **{k: cfg[k] for k in ["hidden_size", "num_layers", "dropout", "head_hidden",
                                    "lr", "weight_decay", "epochs", "grad_clip", "scheduler"]},
             "mean_rmse": float(np.mean(seed_rmses)),
@@ -434,31 +515,39 @@ def main() -> None:
     best = results.iloc[0]
     baseline = results[results["config"] == "baseline_rank1"]
     config_meta = {
-        "experiment": "H4_S5_feature_gru_hpo",
-        "base_setting": "S1_T4 Delta+Meta prefix-80 LOCV feature_gru (leader board rank #1)",
+        "experiment": f"H4_S5_{args.model}_hpo",
+        "model_type": args.model,
+        "base_setting": f"S1_T4 Delta+Meta prefix-80 LOCV {args.model}",
         "prefix_percent": args.prefix, "seeds": seeds,
         "leaderboard_rank1_rmse": 0.094549,
         "search_space": {k: v for k, v in BASE.items()},
+        "film": {
+            "target": "metadata_features_only",
+            "metadata_features": META_FEATURES,
+            "signal_features_preserved": True,
+            "film_hidden_dim": args.film_hidden_dim,
+            "film_dropout": args.film_dropout,
+        } if args.model == "feature_film_gru" else None,
         "best_config": best.to_dict(),
     }
     (out_dir / "configs" / "H4_S5_input_config.json").write_text(
         json.dumps(config_meta, indent=2, default=float), encoding="utf-8"
     )
 
-    log("\n=== TOP CONFIGS (by 3-seed mean LOCV RMSE) ===")
+    log(f"\n=== TOP CONFIGS (by {seed_label} mean LOCV RMSE) ===")
     show = results.head(10)[["rank", "config", "hidden_size", "num_layers", "dropout",
                              "lr", "weight_decay", "epochs", "mean_rmse", "std_rmse", "mean_r2"]]
     log("\n" + show.to_string(index=False))
     if not baseline.empty:
-        log(f"\nBaseline (rank1 config, 3-seed): mean_rmse={float(baseline['mean_rmse'].iloc[0]):.6f}")
+        log(f"\nBaseline (rank1 config, {seed_label}): mean_rmse={float(baseline['mean_rmse'].iloc[0]):.6f}")
     log(f"Best config: {best['config']} -> mean_rmse={best['mean_rmse']:.6f}, mean_r2={best['mean_r2']:.4f}")
     log(f"Leaderboard rank-1 (single seed): 0.094549")
 
     # Report
     lines = [
-        "# H4_S5 feature_gru Hyperparameter Optimization", "",
-        f"- Base setting: **S1_T4 Delta+Meta, prefix {args.prefix}%, LOCV (15 cases), feature_gru**",
-        f"- Selection: each config run with seeds `{seeds}`; ranked by 3-seed mean LOCV RMSE.",
+        f"# H4_S5 {args.model} Hyperparameter Optimization", "",
+        f"- Base setting: **S1_T4 Delta+Meta, prefix {args.prefix}%, LOCV (15 cases), {args.model}**",
+        f"- Selection: each config run with seeds `{seeds}`; ranked by {seed_label} mean LOCV RMSE.",
         f"- Leader board rank-1 (single seed=0): **RMSE 0.094549**", "",
         "## Best configuration", "",
         f"- **{best['config']}**: hidden={int(best['hidden_size'])}, layers={int(best['num_layers'])}, "
