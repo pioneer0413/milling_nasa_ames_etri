@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""B2_S1 (variant): Residual Correction — FeatLSTM backbone + shallow residual model
+"""B2_S1 (variant): Residual Correction — FeatLSTM backbone + residual model
 
 FeatLSTM(AC+vT+vS, Delta+Meta, Full)을 trajectory backbone으로 고정하고, 남은
-오차(residual)만 별도의 shallow 모델(Ridge/RandomForest/XGBoost)이 보정한다.
+오차(residual)만 별도의 모델(Ridge/RandomForest/2-layer MLP)이 보정한다.
 
   base_pred       = FeatLSTM(sequence)
-  residual_model  = f(base_pred, delta+meta features)   <- case_id, previous true VB 절대 미포함
+  residual_model  = f(base_pred, delta features)   <- case_id, process info, previous true VB 절대 미포함
   final_pred      = base_pred + residual_model(...)
 
 Leakage 방지를 위해 nested LOCV로 OOF residual을 생성:
@@ -16,7 +16,7 @@ Leakage 방지를 위해 nested LOCV로 OOF residual을 생성:
       2) train_pool 내부 14-fold inner LOOCV
          - case k 제외 학습 -> k에 대한 OOF base_pred 생성
          - residual_k = y_true_k - OOF_pred_k  (run 단위)
-      3) OOF residual들을 모아 residual model(Ridge/RF/XGB) 학습
+      3) OOF residual들을 모아 residual model(Ridge/RF/MLP) 학습
       4) tc에 대해 final_pred = base_pred_tc + residual_model.predict(base_pred_tc, delta+meta_tc)
       5) observed-VB RMSE 계산 (base-only / corrected 둘 다)
 
@@ -44,7 +44,7 @@ import torch.nn as nn
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import mean_squared_error
-from xgboost import XGBRegressor
+from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -66,7 +66,7 @@ N_SENSORS     = len(SENSORS)
 MASK          = 13   # AC+vT+vS — top1 config
 BACKBONE      = "FeatLSTM"
 BACKBONE_SEED = 0
-RESIDUAL_MODELS = ["Ridge", "RandomForest", "XGBoost"]
+RESIDUAL_MODELS = ["Ridge", "RandomForest", "ResidualMLP"]
 
 REF_OFFICIAL_5SEED = {"FeatGRU": 0.095122, "FeatLSTM": 0.092217}   # official, for context only
 
@@ -74,8 +74,11 @@ RNN_CFG = dict(
     hidden_size=256, num_layers=3, dropout=0.1, head_hidden=32,
     lr=1e-3, weight_decay=1e-4, epochs=200, grad_clip=1.0,
 )
-XGB_RESID_CFG = dict(n_estimators=100, max_depth=3, learning_rate=0.05, n_jobs=4)
 RF_RESID_CFG  = dict(n_estimators=100, max_depth=3, n_jobs=4, random_state=0)
+MLP_RESID_CFG = dict(
+    hidden_dims=(64, 32), lr=1e-3, weight_decay=1e-4, epochs=500,
+    grad_clip=1.0, seed=0,
+)
 
 
 # ─── Utils (identical to run_B2_S1_top1_trajectory_plot.py) ──────────────────
@@ -240,12 +243,68 @@ def fit_predict_rnn(train_cases, test_cases, input_dim, cell_type, device, seed)
         }
 
 
+class ResidualMLP(nn.Module):
+    def __init__(self, input_dim: int, hidden_dims: tuple[int, int]) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dims[0]), nn.ReLU(),
+            nn.Linear(hidden_dims[0], hidden_dims[1]), nn.ReLU(),
+            nn.Linear(hidden_dims[1], 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x).squeeze(-1)
+
+
+def fit_predict_residual_mlp(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_test: np.ndarray,
+    device: torch.device,
+) -> np.ndarray:
+    cfg = MLP_RESID_CFG
+    torch.manual_seed(cfg["seed"])
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(cfg["seed"])
+    np.random.seed(cfg["seed"])
+
+    x_scaler = StandardScaler()
+    x_train_s = x_scaler.fit_transform(x_train)
+    x_test_s = x_scaler.transform(x_test)
+    y_mean = float(np.mean(y_train))
+    y_std = max(float(np.std(y_train)), 1e-8)
+    y_train_s = (y_train - y_mean) / y_std
+
+    x_t = torch.tensor(x_train_s, dtype=torch.float32, device=device)
+    y_t = torch.tensor(y_train_s, dtype=torch.float32, device=device)
+    model = ResidualMLP(x_train.shape[1], cfg["hidden_dims"]).to(device)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"])
+
+    model.train()
+    for _ in range(cfg["epochs"]):
+        optimizer.zero_grad()
+        pred = model(x_t)
+        loss = ((pred - y_t) ** 2).mean()
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
+        optimizer.step()
+        scheduler.step()
+
+    model.eval()
+    with torch.no_grad():
+        x_te = torch.tensor(x_test_s, dtype=torch.float32, device=device)
+        pred = model(x_te).cpu().numpy()
+    return pred * y_std + y_mean
+
+
 def make_residual_model(name: str):
     if name == "Ridge":
         return RidgeCV(alphas=[0.01, 0.1, 1.0, 10.0, 100.0])
     if name == "RandomForest":
         return RandomForestRegressor(**RF_RESID_CFG)
-    return XGBRegressor(**XGB_RESID_CFG, random_state=0, verbosity=0)
+    raise ValueError(f"Unknown sklearn residual model: {name}")
 
 
 # ─── Main nested-LOCV residual correction ────────────────────────────────────
@@ -261,10 +320,10 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== B2_S1: Residual Correction — FeatLSTM backbone + shallow residual model ===")
+    log("=== B2_S1: Residual Correction — FeatLSTM backbone + residual model ===")
     log(f"Backbone: {BACKBONE} (seed={BACKBONE_SEED}), AC+vT+vS, Delta+Meta(15-dim), Full")
     log(f"Residual models: {RESIDUAL_MODELS}")
-    log("Residual features: base_pred + delta+meta(15-dim). NO case_id, NO previous true VB.")
+    log("Residual features: base_pred + delta-only(12-dim). NO process info, NO case_id, NO previous true VB.")
 
     log("\nLoading data...")
     signal_df  = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv", usecols=["case", "run"] + SENSORS)
@@ -312,17 +371,18 @@ def main() -> None:
                 oof_pred_ic = fit_predict_rnn(
                     inner_train_cases, {ic: all_cases[ic]}, input_dim, BACKBONE, device, BACKBONE_SEED)[ic]
             n_inner_trainings += 1
-            seq_ic = all_cases[ic]["seq"]          # (n_runs, 15) delta+meta features
+            seq_ic = all_cases[ic]["seq"]          # (n_runs, 15) delta+meta backbone features
+            resid_feat_ic = seq_ic[:, : -len(META_FEATURES)]  # remove DOC/feed/material for residual learner
             y_true_ic = all_cases[ic]["vb"]
             residual_ic = y_true_ic - oof_pred_ic
             for i in range(len(oof_pred_ic)):
-                oof_X.append(np.concatenate([[oof_pred_ic[i]], seq_ic[i]]))
+                oof_X.append(np.concatenate([[oof_pred_ic[i]], resid_feat_ic[i]]))
                 oof_y.append(residual_ic[i])
         oof_X = np.array(oof_X, dtype=np.float64)
         oof_y = np.array(oof_y, dtype=np.float64)
 
         # 3) test features (base_pred_test + delta+meta of tc)
-        seq_test = all_cases[tc]["seq"]
+        seq_test = all_cases[tc]["seq"][:, : -len(META_FEATURES)]
         X_test = np.concatenate(
             [base_pred_test.reshape(-1, 1), seq_test], axis=1)
 
@@ -330,9 +390,12 @@ def main() -> None:
         for resid_name in RESIDUAL_MODELS:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                resid_model = make_residual_model(resid_name)
-                resid_model.fit(oof_X, oof_y)
-                resid_pred_test = resid_model.predict(X_test)
+                if resid_name == "ResidualMLP":
+                    resid_pred_test = fit_predict_residual_mlp(oof_X, oof_y, X_test, device)
+                else:
+                    resid_model = make_residual_model(resid_name)
+                    resid_model.fit(oof_X, oof_y)
+                    resid_pred_test = resid_model.predict(X_test)
             final_pred_test = base_pred_test + resid_pred_test
             corrected_case_rmses[resid_name][tc] = float(np.sqrt(mean_squared_error(
                 y_true_test[obs_test], final_pred_test[obs_test])))
@@ -397,6 +460,7 @@ def main() -> None:
     summary = {
         "experiment": "B2_S1_residual_correction",
         "backbone": BACKBONE, "backbone_seed": BACKBONE_SEED,
+        "residual_features": "base_pred + delta-only (process info excluded)",
         "residual_models": RESIDUAL_MODELS,
         "base_only_mean": base_mean,
         "base_only_case_rmses": base_only_case_rmses,
