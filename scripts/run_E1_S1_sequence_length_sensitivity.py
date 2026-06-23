@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""H20_S1: Feature Component Ablation — Raw / Delta / Raw+Delta / Raw+Meta / Delta+Meta / Raw+Delta+Meta
+"""E1_S1: Sequence Length Sensitivity — 이전 N run 이력 의존성
 
-I1 논문화 요구사항. Delta+Meta 채택 근거를 각 구성 요소별 기여 분리로 검증.
+E1 논문화 보강 실험. GRU에 가장 최근 N개 run만 입력했을 때 N에 따른 성능 변화.
+N이 커질수록 이력이 늘어나며, N=all이 현재 채택 조건.
 
-6조건 (GRU AC+vT+vS, mask=13, 5-seed, 100% input, LOCV 15 cases):
-  Raw           : 절대값 통계 (mean, rms, std, peak) — no delta, no meta    dim=12
-  Delta         : run-to-run 변화량만                — no raw,   no meta    dim=12
-  Raw+Delta     : 절대값 + 변화량                    — no meta              dim=24
-  Raw+Meta      : 절대값 + DOC/feed/material          — no delta             dim=15
-  Delta+Meta    : 변화량 + meta (현재 채택)                                   dim=15  ← ref H17
-  Raw+Delta+Meta: 절대값 + 변화량 + meta                                      dim=27
+N 조건: [1, 2, 3, 5, 10, all]
+  N=1   : 현재 run만 (시퀀스 효과 없음)
+  N=all : 전체 run 이력 (B4/I1 ref = 0.095122)
 
-Reference (H17_S1, Delta+Meta): mean=0.095122, std=0.001554
+설정: GRU AC+vT+vS (mask=13), Delta+Meta, 5-seed, 100% input, LOCV 15 cases
 
-Output: experiments/executions/H20/S1/{timestamp}_feature_component_ablation/
+Output: experiments/executions/E1/S1/{timestamp}_sequence_length_sensitivity/
 """
 from __future__ import annotations
 
@@ -52,25 +49,19 @@ SEEDS         = [0, 1, 2, 3, 4]
 PCT           = 100
 THRESH        = 1e6
 N_SENSORS     = len(SENSORS)
-GRU_MASK      = 13   # AC+vT+vS
+GRU_MASK      = 13    # AC+vT+vS
 
-REF_DELTA_META_MEAN = 0.095122
-REF_DELTA_META_STD  = 0.001554
+# N=None means use all available runs
+N_CONDITIONS  = [1, 2, 3, 5, 10, None]   # None = all
+N_LABELS      = ["N=1", "N=2", "N=3", "N=5", "N=10", "N=all"]
+
+REF_ALL_MEAN  = 0.095122
+REF_ALL_STD   = 0.001554
 
 GRU_CFG = dict(
     hidden_size=256, num_layers=3, dropout=0.1, head_hidden=32,
     lr=1e-3, weight_decay=1e-4, epochs=200, grad_clip=1.0,
 )
-
-# Feature conditions: (name, use_raw, use_delta, use_meta)
-FEAT_CONDITIONS = [
-    ("Raw",             True,  False, False),
-    ("Delta",           False, True,  False),
-    ("Raw+Delta",       True,  True,  False),
-    ("Raw+Meta",        True,  False, True),
-    ("Delta+Meta",      False, True,  True),   # ← current adopted
-    ("Raw+Delta+Meta",  True,  True,  True),
-]
 
 
 # ─── Utils ────────────────────────────────────────────────────────────────────
@@ -102,24 +93,18 @@ def preprocess(process: pd.DataFrame) -> pd.DataFrame:
 
 
 def mask_sensor_indices(mask: int) -> list[int]:
-    return [
-        i * 4 + j
-        for i in range(N_SENSORS) if (mask >> i) & 1
-        for j in range(4)
-    ]
+    return [i * 4 + j for i in range(N_SENSORS) if (mask >> i) & 1 for j in range(4)]
 
 
 def mask_label(mask: int) -> str:
     return "+".join(SENSOR_ABBR[SENSORS[i]] for i in range(N_SENSORS) if (mask >> i) & 1)
 
 
-# ─── Feature cache (raw 4-stat per run) ──────────────────────────────────────
-def build_raw_cache(
+# ─── Feature cache ────────────────────────────────────────────────────────────
+def build_cache(
     signal_df: pd.DataFrame, proc_clean: pd.DataFrame
 ) -> tuple[dict[tuple[int,int], np.ndarray], dict[int,int]]:
-    """Cache: (case, run) → raw 4-stat vector for GRU_MASK sensors."""
     sensor_indices = mask_sensor_indices(GRU_MASK)
-    n_mask_sensors = bin(GRU_MASK).count("1")
     cache: dict[tuple[int,int], np.ndarray] = {}
     for row in proc_clean.itertuples(index=False):
         case_id, run_id = int(row.case), int(row.run)
@@ -132,9 +117,8 @@ def build_raw_cache(
             continue
         base_len = min(len(a) for a in arrays.values())
         end = max(1, int(np.ceil(base_len * PCT / 100.0)))
-        # full sensor raw (all 6 sensors × 4 stats), then subset by mask
         full = np.concatenate([extract_features(arrays[s][:end]) for s in SENSORS])
-        cache[(case_id, run_id)] = full[sensor_indices]  # shape: (n_mask*4,)
+        cache[(case_id, run_id)] = full[sensor_indices]
 
     first_run: dict[int,int] = {}
     for case_id in proc_clean["case"].unique():
@@ -144,42 +128,29 @@ def build_raw_cache(
     return cache, first_run
 
 
-# ─── Sequence builder ─────────────────────────────────────────────────────────
+# ─── Sequence builder with N-truncation ──────────────────────────────────────
 def build_sequences(
-    raw_cache: dict[tuple[int,int], np.ndarray],
+    cache: dict[tuple[int,int], np.ndarray],
     first_run: dict[int,int],
     proc_clean: pd.DataFrame,
-    use_raw: bool,
-    use_delta: bool,
-    use_meta: bool,
+    n_limit: int | None,
 ) -> dict[int, dict]:
-    n_sensor_feats = bin(GRU_MASK).count("1") * 4  # 12 for AC+vT+vS
+    """Build GRU sequences, keeping only the last n_limit runs per case."""
+    n_sensor_feats = bin(GRU_MASK).count("1") * 4
     case_rows: dict[int, list[dict]] = {c: [] for c in CASE_SCOPE}
 
     for row in proc_clean.itertuples(index=False):
         case_id, run_id = int(row.case), int(row.run)
         key = (case_id, run_id)
-        if key not in raw_cache:
+        if key not in cache:
             continue
-
-        raw_vec = raw_cache[key]  # (12,)
         ref_key = (case_id, first_run.get(case_id, run_id))
-        ref_vec = raw_cache.get(ref_key, np.zeros(n_sensor_feats))
-        delta_vec = raw_vec - ref_vec  # (12,)
-
-        parts: list[np.ndarray] = []
-        if use_raw:
-            parts.append(raw_vec)
-        if use_delta:
-            d = delta_vec.copy()
-            if not np.all(np.isfinite(d)):
-                d = np.where(np.isfinite(d), d, 0.0)
-            parts.append(d)
-        if use_meta:
-            meta = np.array([float(getattr(row, mf, 0.0)) for mf in META_FEATURES])
-            parts.append(meta)
-
-        feat = np.concatenate(parts).astype(np.float32)
+        ref_vec = cache.get(ref_key, np.zeros(n_sensor_feats))
+        delta = cache[key] - ref_vec
+        if not np.all(np.isfinite(delta)):
+            delta = np.where(np.isfinite(delta), delta, 0.0)
+        meta = np.array([float(getattr(row, mf, 0.0)) for mf in META_FEATURES])
+        feat = np.concatenate([delta, meta]).astype(np.float32)
         vb   = float(row.VB) if not pd.isna(row.VB) else 0.0
         case_rows[case_id].append({"feat": feat, "vb": vb, "run": run_id})
 
@@ -188,6 +159,9 @@ def build_sequences(
         if not rows:
             continue
         rows_sorted = sorted(rows, key=lambda r: r["run"])
+        # Keep only last n_limit rows
+        if n_limit is not None and len(rows_sorted) > n_limit:
+            rows_sorted = rows_sorted[-n_limit:]
         seq  = np.stack([r["feat"] for r in rows_sorted])
         vb   = np.array([r["vb"]  for r in rows_sorted], dtype=np.float32)
         runs = np.array([r["run"] for r in rows_sorted], dtype=int)
@@ -300,45 +274,59 @@ def run_locv_seed(
 
 # ─── Plot ─────────────────────────────────────────────────────────────────────
 def plot_results(
-    cond_names: list[str],
-    cond_means: list[float],
-    cond_stds: list[float],
+    n_labels: list[str],
+    means: list[float],
+    stds: list[float],
     out_dir: Path,
 ) -> None:
-    fig, ax = plt.subplots(figsize=(11, 5))
-    x = np.arange(len(cond_names))
-    colors = ["#4878d0", "#ee854a", "#6acc65", "#d65f5f", "#956cb4", "#8c613c"]
-    bars = ax.bar(x, cond_means, color=colors[:len(cond_names)], alpha=0.85,
-                  yerr=cond_stds, capsize=4)
-    # highlight Delta+Meta (current)
-    dm_idx = cond_names.index("Delta+Meta")
-    bars[dm_idx].set_edgecolor("black")
-    bars[dm_idx].set_linewidth(2)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    for bar, mean, std in zip(bars, cond_means, cond_stds):
-        ax.text(bar.get_x() + bar.get_width()/2,
-                bar.get_height() + std + 0.003,
-                f"{mean:.4f}", ha="center", va="bottom", fontsize=8)
-
-    ax.axhline(REF_DELTA_META_MEAN, color="black", linestyle="--", linewidth=1,
-               label=f"Delta+Meta ref={REF_DELTA_META_MEAN:.4f} (H17)")
+    # Left: mean ± std line chart
+    ax = axes[0]
+    x = np.arange(len(n_labels))
+    ax.fill_between(x, np.array(means) - np.array(stds),
+                    np.array(means) + np.array(stds), alpha=0.2, color="steelblue")
+    ax.plot(x, means, "o-", color="steelblue", linewidth=2, markersize=7)
+    ax.axhline(REF_ALL_MEAN, color="gray", linestyle="--", linewidth=1,
+               label=f"N=all ref={REF_ALL_MEAN:.4f}")
+    for xi, (m, s) in enumerate(zip(means, stds)):
+        ax.annotate(f"{m:.4f}", (xi, m + s + 0.003), ha="center", fontsize=8)
     ax.set_xticks(x)
-    ax.set_xticklabels(cond_names, fontsize=10)
+    ax.set_xticklabels(n_labels, fontsize=10)
     ax.set_ylabel("Observed-VB RMSE (5-seed mean ± std)")
-    ax.set_title(f"H20_S1: Feature Component Ablation — GRU {mask_label(GRU_MASK)}, 100% Input")
+    ax.set_title("RMSE vs. Sequence Length N")
     ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # Right: relative degradation vs N=all
+    ax = axes[1]
+    deltas = [m - REF_ALL_MEAN for m in means]
+    colors = ["tomato" if d > 0 else "steelblue" for d in deltas]
+    ax.bar(x, deltas, color=colors, alpha=0.85)
+    for xi, d in enumerate(deltas):
+        ax.text(xi, d + (0.001 if d >= 0 else -0.003),
+                f"{d:+.4f}", ha="center", va="bottom" if d >= 0 else "top", fontsize=8)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(n_labels, fontsize=10)
+    ax.set_ylabel("RMSE − N=all (positive = worse)")
+    ax.set_title("Degradation vs. N=all")
     ax.grid(True, axis="y", alpha=0.3)
+
+    fig.suptitle(
+        f"E1_S1: Sequence Length Sensitivity — GRU {mask_label(GRU_MASK)}, Delta+Meta, 5-seed",
+        fontsize=13)
     plt.tight_layout()
-    fig.savefig(str(out_dir / "feature_component_ablation.png"), dpi=150, bbox_inches="tight")
-    fig.savefig(str(out_dir / "feature_component_ablation.svg"), bbox_inches="tight")
+    fig.savefig(str(out_dir / "sequence_length_sensitivity.png"), dpi=150, bbox_inches="tight")
+    fig.savefig(str(out_dir / "sequence_length_sensitivity.svg"), bbox_inches="tight")
     plt.close(fig)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = (ROOT / "experiments" / "executions" / "H20" / "S1"
-               / f"{ts}_feature_component_ablation")
+    out_dir = (ROOT / "experiments" / "executions" / "E1" / "S1"
+               / f"{ts}_sequence_length_sensitivity")
     for sub in ["metrics", "figures", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -348,10 +336,10 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H20_S1: Feature Component Ablation ===")
-    log(f"GRU: {mask_label(GRU_MASK)} (mask={GRU_MASK}), Seeds={SEEDS}, PCT={PCT}%")
-    log(f"Conditions: {[c[0] for c in FEAT_CONDITIONS]}")
-    log(f"Ref (Delta+Meta, H17): mean={REF_DELTA_META_MEAN}, std={REF_DELTA_META_STD}")
+    log("=== E1_S1: Sequence Length Sensitivity ===")
+    log(f"GRU: {mask_label(GRU_MASK)} (mask={GRU_MASK}), Delta+Meta, Seeds={SEEDS}, PCT={PCT}%")
+    log(f"N conditions: {N_LABELS}")
+    log(f"Ref (N=all, B4): mean={REF_ALL_MEAN}, std={REF_ALL_STD}")
 
     log("\nLoading data...")
     signal_df  = pd.read_csv(ROOT / "datasets/nasa/raw_signal.csv",
@@ -362,27 +350,28 @@ def main() -> None:
     proc_clean = preprocess(process_df)
     log(f"Clean runs: {len(proc_clean)}")
 
-    log("Building raw feature cache...")
-    raw_cache, first_run = build_raw_cache(signal_df, proc_clean)
-    log(f"Cache size: {len(raw_cache)} runs")
+    log("Building feature cache...")
+    cache, first_run = build_cache(signal_df, proc_clean)
+    log(f"Cache size: {len(cache)} runs")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log(f"Device: {device}")
+    n_sensor  = bin(GRU_MASK).count("1")
+    input_dim = n_sensor * 4 + len(META_FEATURES)   # 15
+    device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log(f"Device: {device}, input_dim={input_dim}")
 
     results: dict[str, dict] = {}
     t_total = time_mod.time()
 
-    for cond_name, use_raw, use_delta, use_meta in FEAT_CONDITIONS:
-        n_sensor = bin(GRU_MASK).count("1")
-        input_dim = (n_sensor * 4 if use_raw else 0) + \
-                    (n_sensor * 4 if use_delta else 0) + \
-                    (len(META_FEATURES) if use_meta else 0)
-        log(f"\n--- {cond_name}  input_dim={input_dim} ---")
+    for n_limit, n_label in zip(N_CONDITIONS, N_LABELS):
+        log(f"\n--- {n_label} ---")
+        all_cases = build_sequences(cache, first_run, proc_clean, n_limit)
 
-        all_cases = build_sequences(raw_cache, first_run, proc_clean,
-                                    use_raw, use_delta, use_meta)
+        # Report actual sequence lengths
+        lens = [info["n_runs"] for info in all_cases.values()]
+        log(f"  Actual seq lengths: min={min(lens)}, max={max(lens)}, mean={np.mean(lens):.1f}")
+
         seed_rmses: list[float] = []
-        case_matrix: dict[int, list[float]] = {c: [] for c in CASE_SCOPE}
+        case_matrix: dict[int,list[float]] = {c: [] for c in CASE_SCOPE}
         t0 = time_mod.time()
 
         for seed in SEEDS:
@@ -394,65 +383,65 @@ def main() -> None:
 
         mean_ = float(np.mean(seed_rmses))
         std_  = float(np.std(seed_rmses))
-        cv_   = std_ / mean_ if mean_ > 0 else float("nan")
-        delta = mean_ - REF_DELTA_META_MEAN
-        log(f"  {cond_name}: mean={mean_:.6f}  std={std_:.6f}  CV={cv_:.4f}  "
-            f"vs Delta+Meta: {delta:+.6f}")
+        delta = mean_ - REF_ALL_MEAN
+        log(f"  {n_label}: mean={mean_:.6f}  std={std_:.6f}  vs N=all: {delta:+.6f}")
 
-        results[cond_name] = {
-            "use_raw": use_raw, "use_delta": use_delta, "use_meta": use_meta,
-            "input_dim": input_dim,
+        results[n_label] = {
+            "n_limit": n_limit,
             "seed_rmses": seed_rmses,
-            "mean": mean_, "std": std_, "cv": cv_,
-            "vs_delta_meta": delta,
+            "mean": mean_, "std": std_,
+            "vs_all": delta,
+            "seq_len_min": int(min(lens)),
+            "seq_len_max": int(max(lens)),
+            "seq_len_mean": float(np.mean(lens)),
             "case_matrix": {c: vs for c, vs in case_matrix.items() if vs},
         }
 
-    # ── Save CSVs ─────────────────────────────────────────────────────────────
+    # ── Save ──────────────────────────────────────────────────────────────────
     agg_rows = [
-        {
-            "condition": name,
-            "use_raw": r["use_raw"], "use_delta": r["use_delta"], "use_meta": r["use_meta"],
-            "input_dim": r["input_dim"],
-            "mean": r["mean"], "std": r["std"], "cv": r["cv"],
-            "vs_delta_meta": r["vs_delta_meta"],
-        }
-        for name, r in results.items()
+        {"n_label": lbl, "n_limit": r["n_limit"],
+         "mean": r["mean"], "std": r["std"], "vs_all": r["vs_all"]}
+        for lbl, r in results.items()
     ]
     pd.DataFrame(agg_rows).to_csv(out_dir / "metrics" / "aggregate.csv", index=False)
 
     seed_rows = []
-    for name, r in results.items():
-        for i, (s, v) in enumerate(zip(SEEDS, r["seed_rmses"])):
-            seed_rows.append({"condition": name, "seed": s, "rmse": v})
+    for lbl, r in results.items():
+        for s, v in zip(SEEDS, r["seed_rmses"]):
+            seed_rows.append({"n_label": lbl, "seed": s, "rmse": v})
     pd.DataFrame(seed_rows).to_csv(out_dir / "metrics" / "seed_detail.csv", index=False)
 
     # ── Plot ──────────────────────────────────────────────────────────────────
-    cond_names = [c[0] for c in FEAT_CONDITIONS]
-    cond_means = [results[n]["mean"] for n in cond_names]
-    cond_stds  = [results[n]["std"]  for n in cond_names]
-    plot_results(cond_names, cond_means, cond_stds, out_dir / "figures")
+    means = [results[lbl]["mean"] for lbl in N_LABELS]
+    stds  = [results[lbl]["std"]  for lbl in N_LABELS]
+    plot_results(N_LABELS, means, stds, out_dir / "figures")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     log("\n=== SUMMARY ===")
-    log(f"{'Condition':<20} {'dim':>4} {'Mean':>10} {'Std':>10} {'vs Delta+Meta':>15}")
-    log("-" * 65)
-    for name in cond_names:
-        r = results[name]
-        marker = " ←" if name == "Delta+Meta" else ""
-        log(f"{name:<20} {r['input_dim']:>4} {r['mean']:>10.6f} {r['std']:>10.6f}"
-            f" {r['vs_delta_meta']:>+15.6f}{marker}")
+    log(f"{'N':<8} {'Mean':>10} {'Std':>10} {'vs N=all':>12}")
+    log("-" * 44)
+    for lbl in N_LABELS:
+        r = results[lbl]
+        marker = " ←" if lbl == "N=all" else ""
+        log(f"{lbl:<8} {r['mean']:>10.6f} {r['std']:>10.6f} {r['vs_all']:>+12.6f}{marker}")
 
-    best = min(results, key=lambda n: results[n]["mean"])
+    best = min(results, key=lambda l: results[l]["mean"])
     log(f"\nBest: {best}  mean={results[best]['mean']:.6f}")
 
+    # Saturation analysis: find smallest N within 1% of N=all
+    for lbl in N_LABELS:
+        r = results[lbl]
+        if abs(r["vs_all"]) / REF_ALL_MEAN < 0.01:
+            log(f"Saturation (within 1% of N=all): {lbl}")
+            break
+
     summary = {
-        "experiment": "H20_S1_feature_component_ablation",
+        "experiment": "E1_S1_sequence_length_sensitivity",
         "gru_mask": GRU_MASK, "sensor_subset": mask_label(GRU_MASK),
         "seeds": SEEDS, "pct": PCT,
-        "conditions": results,
-        "best_condition": best,
-        "ref_delta_meta": {"mean": REF_DELTA_META_MEAN, "std": REF_DELTA_META_STD},
+        "n_conditions": {lbl: results[lbl] for lbl in N_LABELS},
+        "best_n": best,
+        "ref_all": {"mean": REF_ALL_MEAN, "std": REF_ALL_STD},
         "execution_dir": str(out_dir),
         "total_elapsed_s": time_mod.time() - t_total,
     }

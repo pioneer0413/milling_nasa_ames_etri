@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H22_S1: Comprehensive Baseline — H18 확장판.
+"""B3_S1: Comprehensive Baseline — H18 확장판.
 
 B3 업데이트. Feature-GRU vs 13종 baseline 모델 종합 비교.
 
@@ -8,25 +8,30 @@ CF       : Carry-forward (no training)          — original H18
 RL       : RunIndex Linear                      — original H18
 ML       : Meta+RunIndex Linear                 — original H18
 DL       : Delta+Meta Linear                    — original H18
-Ridge    : RidgeCV                              — H22 NEW
-RF       : RandomForest (seed-sensitive)        — H22 NEW
-SVR      : SVR RBF kernel                       — H22 NEW
-MLP_Feat : 2-layer MLP [15→128→64→1]           — H22 NEW
+Ridge    : RidgeCV                              — B3 NEW
+RF       : RandomForest (seed-sensitive)        — B3 NEW
+SVR      : SVR RBF kernel                       — B3 NEW
+MLP_Feat : 2-layer MLP [15→128→64→1]           — B3 NEW
 
 ─── Signal-based per-run (raw AC+vT+vS, L timesteps) ──────────────
-SignalCNN: 1D Conv → GlobalAvgPool → head       — H22 NEW
-SignalGRU: GRU over timesteps → last hidden     — H22 NEW
+SignalCNN: 1D Conv → GlobalAvgPool → head       — B3 NEW
+SignalGRU: GRU over timesteps → last hidden     — B3 NEW
 
 ─── Feature-based sequence (Delta+Meta 15-dim over run sequence) ───
-FeatRNN  : RNN(256×3)  + MLP head(32)          — H22 NEW
-FeatLSTM : LSTM(256×3) + MLP head(32)          — H22 NEW
-FeatGRU  : GRU(256×3)  + MLP head(32)          — H22 NEW (re-run for consistency)
+FeatRNN  : RNN(256×3)  + MLP head(32)          — B3 NEW
+FeatLSTM : LSTM(256×3) + MLP head(32)          — B3 NEW
+FeatGRU  : GRU(256×3)  + MLP head(32)          — B3 NEW (re-run for consistency)
 
-─── Reference (from H17) ───────────────────────────────────────────
+─── Signal + process hybrid (Cai et al., 2020 hybrid LSTM) ─────────
+Cai2020       : LSTM(256×3) over downsampled raw signal + process
+                [case#, DOC, feed, material, prev-VB] → FC(32,8)   — B3 NEW
+Cai2020_noPVB : same, process without prev-VB (prev-VB ablation)   — B3 NEW
+
+─── Reference (from B4) ───────────────────────────────────────────
 XGBoost (per-run): mean=0.109239
 
 Protocol: LOCV 15 cases, observed_vb eval, 5-seed for stochastic models.
-Output: experiments/executions/H22/S1/{timestamp}_comprehensive_baseline/
+Output: experiments/executions/B3/S1/{timestamp}_comprehensive_baseline/
 """
 from __future__ import annotations
 
@@ -70,8 +75,8 @@ THRESH        = 1e6
 N_SENSORS     = len(SENSORS)
 GRU_MASK      = 13   # AC+vT+vS
 
-# References from H17/H18 (XGBoost only; GRU is now re-run for consistency)
-REF = {"XGBoost (H17)": 0.109239}
+# References from B4/H18 (XGBoost only; GRU is now re-run for consistency)
+REF = {"XGBoost (B4)": 0.109239}
 
 # Signal model hyperparams
 SIG_EPOCHS    = 150
@@ -95,6 +100,21 @@ SEQ_EPOCHS    = 200
 SEQ_LR        = 1e-3
 SEQ_WD        = 1e-4
 SEQ_GRAD_CLIP = 1.0
+
+# Cai2020 hybrid LSTM hyperparams (Notion Model DB: cai2020_hybridLSTM)
+#   3-layer stacked LSTM(256) over downsampled raw signal, last-hidden temporal
+#   feature concatenated with process info, then FC(32,8) regression head.
+#   Architecture follows the paper; LOCV / observed-VB eval / per-channel z-score
+#   / target standardization follow the existing B3 signal-model convention.
+CAI_HIDDEN       = 256
+CAI_LAYERS       = 3
+CAI_LSTM_DROPOUT = 0.2
+CAI_HEAD_HID     = (32, 8)
+CAI_HEAD_DROPOUT = 0.2
+CAI_LR           = 1e-3
+CAI_BATCH        = 16
+CAI_EPOCHS       = 200
+CAI_DOWNSAMPLE   = 2     # paper: 1/2 downsampling of the raw run signal
 
 
 # ─── Preprocessing ────────────────────────────────────────────────────────────
@@ -685,6 +705,168 @@ def run_feat_seq(
     return float(np.mean(list(case_rmses.values()))), case_rmses
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PART D: Signal + process hybrid (Cai et al., 2020 hybrid LSTM)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class HybridLSTMModel(nn.Module):
+    """Cai2020 hybrid information model.
+
+    Stacked LSTM encodes the (downsampled) raw multi-sensor run signal into a
+    temporal feature (last hidden state); this is concatenated with a process
+    vector and passed through an FC(32,8) regression head to predict VB.
+    """
+    def __init__(self, n_channels: int, n_process: int) -> None:
+        super().__init__()
+        self.lstm = nn.LSTM(
+            n_channels, CAI_HIDDEN, CAI_LAYERS, batch_first=True,
+            dropout=CAI_LSTM_DROPOUT if CAI_LAYERS > 1 else 0.0)
+        h1, h2 = CAI_HEAD_HID
+        self.head = nn.Sequential(
+            nn.Linear(CAI_HIDDEN + n_process, h1), nn.ReLU(), nn.Dropout(CAI_HEAD_DROPOUT),
+            nn.Linear(h1, h2), nn.ReLU(), nn.Dropout(CAI_HEAD_DROPOUT),
+            nn.Linear(h2, 1),
+        )
+
+    def forward(self, signal: torch.Tensor, process: torch.Tensor) -> torch.Tensor:
+        # signal: (batch, time, channels); process: (batch, n_process)
+        _, (h, _) = self.lstm(signal)
+        temporal = h[-1]                       # last-layer last hidden state
+        return self.head(torch.cat([temporal, process], dim=1)).squeeze(-1)
+
+
+def build_process_cache(
+    proc_clean: pd.DataFrame, use_prev_vb: bool
+) -> dict[tuple[int,int], np.ndarray]:
+    """(case, run) → process vector [case#, DOC, feed, material, (prev-run VB)].
+
+    Per the paper, process info on NASA Ames is [case number, depth of cut, feed,
+    material, flank wear of the last run]. ``use_prev_vb`` toggles the last term;
+    prev-run VB is a carry-forward of the true VB (first run = 0) and is reported
+    as a separate with/without variant to isolate its leakage-like contribution.
+    Note: under LOCV the held-out case number is unseen in training (kept for
+    fidelity to the paper's feature list).
+    """
+    cache: dict[tuple[int,int], np.ndarray] = {}
+    for case_id, grp in proc_clean.groupby("case"):
+        grp = grp.sort_values("run")
+        vbs = grp["VB"].to_numpy(float)
+        prev = np.concatenate([[0.0], vbs[:-1]])
+        for i, row in enumerate(grp.itertuples(index=False)):
+            feats = [float(case_id), float(row.DOC), float(row.feed), float(row.material)]
+            if use_prev_vb:
+                feats.append(float(prev[i]))
+            cache[(int(case_id), int(row.run))] = np.array(feats, dtype=np.float32)
+    return cache
+
+
+def _hybrid_locv(
+    sig_cache: dict[tuple[int,int], np.ndarray],
+    proc_cache: dict[tuple[int,int], np.ndarray],
+    proc_clean: pd.DataFrame,
+    device: torch.device,
+    seed: int,
+    n_process: int,
+) -> tuple[float, dict[int,float]]:
+    n_ch = len(SIGNAL_SENSORS)
+    case_rmses: dict[int,float] = {}
+
+    for tc in CASE_SCOPE:
+        tr_rows = proc_clean[proc_clean["case"] != tc]
+        te_rows = proc_clean[proc_clean["case"] == tc].sort_values("run")
+        if tr_rows.empty or te_rows.empty:
+            continue
+
+        def gather(rows):
+            sigs, procs, vbs, runs = [], [], [], []
+            for row in rows.itertuples(index=False):
+                key = (int(row.case), int(row.run))
+                if key not in sig_cache or key not in proc_cache:
+                    continue
+                sigs.append(sig_cache[key])
+                procs.append(proc_cache[key])
+                vbs.append(float(row.VB))
+                runs.append(int(row.run))
+            if not sigs:
+                return None
+            return (np.stack(sigs), np.stack(procs),
+                    np.array(vbs, np.float32), np.array(runs))
+
+        tr = gather(tr_rows)
+        te = gather(te_rows)
+        if tr is None or te is None:
+            continue
+        X_tr, P_tr, y_tr, _      = tr
+        X_te, P_te, y_te, runs_te = te
+
+        # Paper: 1/2 downsampling of the raw run signal
+        X_tr = X_tr[:, ::CAI_DOWNSAMPLE, :]
+        X_te = X_te[:, ::CAI_DOWNSAMPLE, :]
+
+        # Per-channel z-score on the signal (fit on train)
+        L = X_tr.shape[1]
+        sig_scaler = StandardScaler().fit(X_tr.reshape(-1, n_ch))
+        X_tr = sig_scaler.transform(X_tr.reshape(-1, n_ch)).reshape(-1, L, n_ch).astype(np.float32)
+        X_te = sig_scaler.transform(X_te.reshape(-1, n_ch)).reshape(-1, L, n_ch).astype(np.float32)
+
+        # Standardize process features (fit on train)
+        proc_scaler = StandardScaler().fit(P_tr)
+        P_tr = proc_scaler.transform(P_tr).astype(np.float32)
+        P_te = proc_scaler.transform(P_te).astype(np.float32)
+
+        y_mean, y_std = float(y_tr.mean()), max(float(y_tr.std()), 1e-8)
+
+        torch.manual_seed(seed)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(seed)
+        model = HybridLSTMModel(n_ch, n_process).to(device)
+        opt   = torch.optim.Adam(model.parameters(), lr=CAI_LR)
+        sch   = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=CAI_EPOCHS)
+
+        Xtr_t = torch.tensor(X_tr).to(device)
+        Ptr_t = torch.tensor(P_tr).to(device)
+        ytr_t = torch.tensor((y_tr - y_mean) / y_std).to(device)
+
+        n_train = len(Xtr_t)
+        model.train()
+        for _ in range(CAI_EPOCHS):
+            perm = torch.randperm(n_train)
+            for i in range(0, n_train, CAI_BATCH):
+                idx = perm[i:i+CAI_BATCH]
+                opt.zero_grad()
+                loss = ((model(Xtr_t[idx], Ptr_t[idx]) - ytr_t[idx]) ** 2).mean()
+                loss.backward()
+                opt.step()
+            sch.step()
+
+        model.eval()
+        with torch.no_grad():
+            y_pred = (model(torch.tensor(X_te).to(device),
+                            torch.tensor(P_te).to(device)).cpu().numpy()
+                      * y_std + y_mean)
+        y_pred = np.clip(y_pred, 0.0, None)
+
+        obs = obs_mask(tc, runs_te)
+        if obs.sum() == 0:
+            continue
+        case_rmses[tc] = float(np.sqrt(mean_squared_error(y_te[obs], y_pred[obs])))
+
+    mean_rmse = float(np.mean(list(case_rmses.values()))) if case_rmses else float("nan")
+    return mean_rmse, case_rmses
+
+
+def run_hybrid_lstm(
+    sig_cache: dict[tuple[int,int], np.ndarray],
+    proc_clean: pd.DataFrame,
+    device: torch.device,
+    seed: int,
+    use_prev_vb: bool,
+) -> tuple[float, dict[int,float]]:
+    proc_cache = build_process_cache(proc_clean, use_prev_vb)
+    n_process  = 5 if use_prev_vb else 4
+    return _hybrid_locv(sig_cache, proc_cache, proc_clean, device, seed, n_process)
+
+
 # ─── Aggregation helper ───────────────────────────────────────────────────────
 def aggregate_seeds(
     results_per_seed: list[tuple[float, dict[int,float]]]
@@ -717,8 +899,11 @@ _COLOR_MAP = {
     "FeatRNN":   "#ff7f0e",
     "FeatLSTM":  "#e8640c",
     "FeatGRU":   "#2ca02c",
+    # signal + process hybrid (Cai2020)
+    "Cai2020":       "#9467bd",
+    "Cai2020_noPVB": "#c4a3e0",
     # references
-    "XGBoost (H17)": "#8c564b",
+    "XGBoost (B4)": "#8c564b",
 }
 _DEFAULT_COLOR = "#999999"
 
@@ -747,7 +932,7 @@ def plot_results(model_names, means, stds, out_dir):
     ax.set_xticks(range(len(all_names)))
     ax.set_xticklabels(all_names, rotation=30, ha="right", fontsize=9)
     ax.set_ylabel("Observed-VB RMSE (mean ± std, LOCV)")
-    ax.set_title("H22_S1: Comprehensive Baseline — 13 models vs FeatGRU")
+    ax.set_title("B3_S1: Comprehensive Baseline — 13 models vs FeatGRU")
     ax.legend(fontsize=9)
     ax.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
@@ -766,7 +951,7 @@ def save_checkpoint(results: dict, out_dir: Path) -> None:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out_dir = ROOT / "experiments" / "executions" / "H22" / "S1" / f"{ts}_comprehensive_baseline"
+    out_dir = ROOT / "experiments" / "executions" / "B3" / "S1" / f"{ts}_comprehensive_baseline"
     for sub in ["metrics", "figures", "logs"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -776,8 +961,9 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H22_S1: Comprehensive Baseline ===")
-    log("Models: CF, RL, ML, DL, Ridge, RF, SVR, MLP_Feat, SignalCNN, SignalGRU, FeatRNN, FeatLSTM, FeatGRU")
+    log("=== B3_S1: Comprehensive Baseline ===")
+    log("Models: CF, RL, ML, DL, Ridge, RF, SVR, MLP_Feat, SignalCNN, SignalGRU, "
+        "FeatRNN, FeatLSTM, FeatGRU, Cai2020, Cai2020_noPVB")
     log(f"Seeds={SEEDS}, PCT={PCT}%, LOCV={len(CASE_SCOPE)} cases")
 
     log("\nLoading data...")
@@ -832,6 +1018,8 @@ def main() -> None:
         ("FeatRNN",    lambda seed: run_feat_seq(feat_df, device, seed, "rnn")),
         ("FeatLSTM",   lambda seed: run_feat_seq(feat_df, device, seed, "lstm")),
         ("FeatGRU",    lambda seed: run_feat_seq(feat_df, device, seed, "gru")),
+        ("Cai2020",      lambda seed: run_hybrid_lstm(sig_cache, proc_clean, device, seed, use_prev_vb=True)),
+        ("Cai2020_noPVB", lambda seed: run_hybrid_lstm(sig_cache, proc_clean, device, seed, use_prev_vb=False)),
     ]:
         log(f"\n--- {name} (5-seed) ---")
         seed_results: list[tuple[float, dict[int,float]]] = []
@@ -879,7 +1067,7 @@ def main() -> None:
     plot_results(model_names_plot, means_plot, stds_plot, out_dir / "figures")
 
     summary = {
-        "experiment": "H22_S1_comprehensive_baseline",
+        "experiment": "B3_S1_comprehensive_baseline",
         "sig_len": sig_len,
         "seeds": SEEDS,
         "results": {n: {"mean": m, "std": s} for n, (m, s, _) in results.items()},

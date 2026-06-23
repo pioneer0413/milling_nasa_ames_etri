@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""H22_S1_resume: SignalGRU + FeatRNN/LSTM/GRU 재실행.
+"""B3_S1_resume: SignalGRU + FeatRNN/LSTM/GRU 재실행.
 
-이전 H22 부분 실행에서 완료된 결과(CF/RL/ML/DL/Ridge/SVR/RF/MLP_Feat/SignalCNN)를
+이전 B3 부분 실행에서 완료된 결과(CF/RL/ML/DL/Ridge/SVR/RF/MLP_Feat/SignalCNN)를
 pre-load하고, 미완료 모델(SignalGRU, FeatRNN, FeatLSTM, FeatGRU)만 실행.
 각 모델 완료 직후 checkpoint.json 저장.
 
-Output: experiments/executions/H22/S1/{timestamp}_comprehensive_baseline_resume/
+Output: experiments/executions/B3/S1/{timestamp}_comprehensive_baseline_resume/
 """
 from __future__ import annotations
 
@@ -27,14 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# ─── Import H22 module ────────────────────────────────────────────────────────
+# ─── Import B3 module ────────────────────────────────────────────────────────
 _spec = importlib.util.spec_from_file_location(
-    "h22", ROOT / "scripts" / "run_H22_S1_comprehensive_baseline.py"
+    "b3", ROOT / "scripts" / "run_B3_S1_comprehensive_baseline.py"
 )
-_h22 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_h22)
+_b3 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_b3)
 
-# ─── Known results (CF/RL/ML/DL from H18_S1; Ridge~SignalCNN from partial H22) ──
+# ─── Known results (CF/RL/ML/DL from H18_S1; Ridge~SignalCNN from partial B3) ──
 # (mean, std, case_rmses)  — case_rmses empty: not saved from interrupted run
 KNOWN_RESULTS: dict[str, tuple[float, float, dict]] = {
     "CF":        (0.096361, 0.0,       {}),
@@ -48,8 +48,8 @@ KNOWN_RESULTS: dict[str, tuple[float, float, dict]] = {
     "SignalCNN": (0.177733, 0.001313,  {}),
 }
 
-SEEDS = _h22.SEEDS
-REF   = _h22.REF
+SEEDS = _b3.SEEDS
+REF   = _b3.REF
 
 
 def save_checkpoint(results: dict, out_dir: Path) -> None:
@@ -62,7 +62,7 @@ def save_checkpoint(results: dict, out_dir: Path) -> None:
 def main() -> None:
     ts      = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     out_dir = (
-        ROOT / "experiments" / "executions" / "H22" / "S1"
+        ROOT / "experiments" / "executions" / "B3" / "S1"
         / f"{ts}_comprehensive_baseline_resume"
     )
     for sub in ["metrics", "figures", "logs"]:
@@ -74,24 +74,24 @@ def main() -> None:
         print(line, flush=True)
         log_lines.append(line)
 
-    log("=== H22_S1 Resume: FeatRNN/LSTM/GRU ===")
+    log("=== B3_S1 Resume: FeatRNN/LSTM/GRU ===")
     log("Pre-loaded: CF, RL, ML, DL, Ridge, SVR, RF, MLP_Feat, SignalCNN")
     log(f"Running: FeatRNN, FeatLSTM, FeatGRU  (seeds={SEEDS})")
 
     log("\nLoading data...")
     signal_df  = pd.read_csv(
         ROOT / "datasets/nasa/raw_signal.csv",
-        usecols=["case", "run"] + _h22.SENSORS,
+        usecols=["case", "run"] + _b3.SENSORS,
     )
     process_df = pd.read_csv(ROOT / "datasets/nasa/process_info.csv")
-    process_df = process_df[process_df["case"].isin(_h22.CASE_SCOPE)].copy()
-    signal_df  = signal_df[signal_df["case"].isin(_h22.CASE_SCOPE)].copy()
-    proc_clean = _h22.preprocess(process_df)
+    process_df = process_df[process_df["case"].isin(_b3.CASE_SCOPE)].copy()
+    signal_df  = signal_df[signal_df["case"].isin(_b3.CASE_SCOPE)].copy()
+    proc_clean = _b3.preprocess(process_df)
     log(f"Clean runs: {len(proc_clean)}")
 
     log("Building handcrafted feature cache...")
-    feat_cache, first_run = _h22.build_feat_cache(signal_df, proc_clean)
-    feat_df = _h22.build_feat_df(feat_cache, first_run, proc_clean)
+    feat_cache, first_run = _b3.build_feat_cache(signal_df, proc_clean)
+    feat_df = _b3.build_feat_df(feat_cache, first_run, proc_clean)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log(f"Device: {device}")
@@ -102,9 +102,9 @@ def main() -> None:
 
     # ── Missing stochastic models ─────────────────────────────────────────────
     for name, fn in [
-        ("FeatRNN",   lambda seed: _h22.run_feat_seq(feat_df, device, seed, "rnn")),
-        ("FeatLSTM",  lambda seed: _h22.run_feat_seq(feat_df, device, seed, "lstm")),
-        ("FeatGRU",   lambda seed: _h22.run_feat_seq(feat_df, device, seed, "gru")),
+        ("FeatRNN",   lambda seed: _b3.run_feat_seq(feat_df, device, seed, "rnn")),
+        ("FeatLSTM",  lambda seed: _b3.run_feat_seq(feat_df, device, seed, "lstm")),
+        ("FeatGRU",   lambda seed: _b3.run_feat_seq(feat_df, device, seed, "gru")),
     ]:
         log(f"\n--- {name} (5-seed) ---")
         seed_results: list[tuple[float, dict[int, float]]] = []
@@ -113,7 +113,7 @@ def main() -> None:
             mean_, case_r = fn(seed)
             seed_results.append((mean_, case_r))
             log(f"  seed={seed}  RMSE={mean_:.6f}  [{time_mod.time()-t0:.0f}s]")
-        m, s, case_r = _h22.aggregate_seeds(seed_results)
+        m, s, case_r = _b3.aggregate_seeds(seed_results)
         results[name] = (m, s, case_r)
         log(f"  {name}: mean={m:.6f}  std={s:.6f}")
         save_checkpoint(results, out_dir)
@@ -150,10 +150,10 @@ def main() -> None:
             per_case[name] = [cr.get(c, float("nan")) for c in case_ids]
         pd.DataFrame(per_case).to_csv(out_dir / "metrics" / "per_case.csv", index=False)
 
-    _h22.plot_results(model_names_plot, means_plot, stds_plot, out_dir / "figures")
+    _b3.plot_results(model_names_plot, means_plot, stds_plot, out_dir / "figures")
 
     summary = {
-        "experiment": "H22_S1_comprehensive_baseline_resume",
+        "experiment": "B3_S1_comprehensive_baseline_resume",
         "seeds": SEEDS,
         "results": {n: {"mean": m, "std": s} for n, (m, s, _) in results.items()},
         "references": REF,

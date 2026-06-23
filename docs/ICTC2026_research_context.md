@@ -169,5 +169,23 @@ Notion 실험 DB의 PHM2010 라인은 본 repo에서 재현 가능:
 - `scripts/run_B1_S1_phm2010_feature_baseline.py` — 9-model LOCV-3 baseline. **주의**: 파일명의 "B1"은 옛 번호(스크립트 작성 시점). 2026-06-22 Notion 재배치로 현재는 **[E7] PHM2010 Feature-GRU LOCV 실행**에 해당 — 새 Notion [B1]은 NASA "Model x (Entry-Steady)"로 의미가 다름.
 - `scripts/run_B1_S2_phm2010_flute_augment.py` — flute-label 증강(궤적 2→6). 위와 동일하게 파일명 번호는 옛 [B1](현 [E7]) 기준.
 - `scripts/run_E5_S1_phm2010_delta_feature.py` — [E5] Delta feature 비대칭 해소(sequence가 RF 역전).
+### Notion 실험 ID ↔ repo 스크립트 매핑 (활성 Run-sequence Modeling DB)
+스크립트 접두사는 Notion의 B/I/E Class·번호와 1:1 정합. (구 H17~H22 → B/I/E rename 완료, 2026-06-17)
 
-NASA 라인(H 시리즈)은 `datasets/nasa/raw_signal.csv`(gitignored)가 필요. 자세한 데이터 가용성은 `README.md` 참조.
+| Notion ID | Dataset | 제목 | repo 스크립트 |
+|---|---|---|---|
+| [B1] | PHM2010 | Feature-GRU LOCV baseline | `run_B1_S1_phm2010_feature_baseline.py`, `run_B1_S2_phm2010_flute_augment.py` |
+| [B2] | NASA | Shuffled-Sequence Ablation | `run_B2_S1_shuffled_ablation.py` (구 H19) |
+| [B3] | NASA | Naive/Comprehensive Baseline | `run_B3_S1_comprehensive_baseline.py` (구 H22, 최신본) + `run_B3_S1_resume.py`; `run_H18_S1_naive_baseline.py`는 legacy(superseded) |
+| [B4] | NASA | 5-Seed Stability (100% 입력) | `run_B4_S1_seed_stability.py` (구 H17) |
+| [I1] | NASA | Feature Component Ablation | `run_I1_S1_feature_component_ablation.py` (구 H20) |
+| [I2] | — | Physics-Based Baseline (Paris Law) 검토 | (코드 미존재 — 검토 단계) |
+| [E1] | NASA | Sequence Length Sensitivity | `run_E1_S1_sequence_length_sensitivity.py` (구 H21) |
+| [E2] | NASA | Hidden State 분석 | (코드 미존재) |
+| [E3] | NASA | Case 1 Non-Monotone VB | 분석: `run_H7_S1_case1_case12_difficulty_analysis.py` |
+| [E4] | NASA | Case 12 Delta Baseline 편이 | 분석: `run_H7_S1_…` (공유) |
+| [E5] | PHM2010 | Delta-feature 비대칭 해소 | `run_E5_S1_phm2010_delta_feature.py` |
+
+> H1~H16은 구 "segment-aware" 시대 스크립트로 Notion **Archive**(Scenario/Task DB)에 대응 → rename 대상 아님, 현 이름 유지.
+
+NASA 라인(B/I/E·H 시리즈)은 `datasets/nasa/raw_signal.csv`(gitignored)가 필요. 자세한 데이터 가용성은 `README.md` 참조.
